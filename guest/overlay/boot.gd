@@ -11,6 +11,7 @@ var hint: Label
 var cam_rig: Node3D
 var charts: Node3D
 var chart_cam: Camera3D
+var model_box := AABB(Vector3(-0.5, 0, -0.5), Vector3(1, 1, 1))
 
 func _ready() -> void:
 	RenderingServer.set_default_clear_color(PAPER)
@@ -36,7 +37,7 @@ func _ready() -> void:
 	(cam.get_node("DirectionalLight3D") as DirectionalLight3D).light_energy = 0.73
 	root.add_child(_backdrop())
 	charts = _color_charts()
-	cam.add_child(charts)
+	root.add_child(charts)
 	chart_cam = cam
 	# UIController's Grid export is never set in ModelExplorer.tscn, so Hide Grid did nothing.
 	root.get_node("Node").set("Grid", root.get_node("GizmoPlane"))
@@ -79,7 +80,7 @@ const CHECKER := [
 const CHART_W := 0.16
 const CHART_H := 0.107
 
-# Two charts fixed in the camera's view: the top one is lit like the model (it shows what the
+# Two charts standing beside the model, turned to face the camera: the top one is lit like the model (it shows what the
 # lights and ambient do), the bottom one is unshaded (it shows only the output transform:
 # tonemapper, sRGB encode, canvas). C shows or hides them. Patch centres are printed as
 # "CHART <lit|flat> <index> <x> <y>" so a test can read the screen at those pixels.
@@ -106,8 +107,8 @@ func _color_charts() -> Node3D:
 		mi.mesh = quad
 		mi.material_override = mat
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		# Right of the model, between the Tool panel and the controls card (camera fov is about 38 deg).
-		mi.position = Vector3(0.23 if lit else 0.41, 0.1, -1.0)
+		# Stacked: lit on top, unshaded below.
+		mi.position = Vector3(0.0, CHART_H * 0.56 if lit else -CHART_H * 0.56, 0.0)
 		holder.add_child(mi)
 	return holder
 
@@ -119,10 +120,33 @@ func _print_chart_points() -> void:
 			var sp := chart_cam.unproject_position(m.global_transform * local)
 			print("CHART %s %d %d %d" % [m.name, i, int(sp.x), int(sp.y)])
 
-# CamController scales the camera rig to the model's size; undo it so the charts keep one size on screen.
+# Keep the charts beside the model: to its right as seen from the camera, clear of its widest
+# side, half its height, facing the camera (so the camera-mounted key light hits them as it
+# hits the model's front).
 func _process(_delta: float) -> void:
-	if charts and chart_cam and chart_cam.is_inside_tree():
-		charts.scale = Vector3.ONE / chart_cam.global_transform.basis.get_scale()
+	if not (charts and chart_cam and chart_cam.is_inside_tree()):
+		return
+	var cb := chart_cam.global_transform.basis.orthonormalized()
+	var h := maxf(model_box.size.y, 0.001)
+	var k := 0.5 * h / (2.2 * CHART_H)
+	var half_w := 0.5 * Vector2(model_box.size.x, model_box.size.z).length()
+	var side := half_w + 0.08 * h + 0.5 * CHART_W * k
+	var c := model_box.get_center()
+	charts.global_transform = Transform3D(cb.scaled(Vector3(k, k, k)), c + cb.x * side)
+
+func _measure_model() -> void:
+	var box := AABB()
+	var first := true
+	for model in get_tree().get_nodes_in_group("gltf group"):
+		for m in model.find_children("*", "MeshInstance3D", true, false):
+			var mi := m as MeshInstance3D
+			if mi.mesh == null or mi.is_in_group("vsk_web_wire"):
+				continue
+			var b := mi.global_transform * mi.get_aabb()
+			box = b if first else box.merge(b)
+			first = false
+	if not first:
+		model_box = box
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
@@ -244,6 +268,7 @@ func _on_loaded(ok: bool, _scene) -> void:
 		hint.text = "That file could not be opened. Try a .glb, .gltf or .vrm."
 		return
 	loads += 1
+	_measure_model.call_deferred()
 	get_tree().create_timer(1.0).timeout.connect(_print_chart_points)
 	# The camera starts level with the floor grid, which then shows edge-on as nothing; look down a
 	# little so the grid is visible. Deferred: CamController resets the pitch on the same signal.

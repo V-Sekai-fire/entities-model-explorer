@@ -1,0 +1,15 @@
+[workspace]
+name = "anny-soma-woman"
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[dependencies]
+python = "3.11.*"
+
+[pypi-dependencies]
+anny = { path = "/Users/ernest.lee/Desktop/chibifire-smoke-water/3-interactor/anny", editable = true }
+numpy = ">=2.0"
+torch = ">=2.6"
+pygltflib = ">=1.16"
+scipy = "*"
+pillow = "*"

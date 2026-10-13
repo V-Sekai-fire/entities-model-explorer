@@ -1,0 +1,13 @@
+config_version=5
+
+[application]
+
+config/name="cartridge-check"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "Mobile")
+boot_splash/bg_color=Color(0.93, 0.93, 0.92, 1)
+
+[rendering]
+
+renderer/rendering_method="mobile"
+environment/defaults/default_clear_color=Color(0.93, 0.93, 0.92, 1)

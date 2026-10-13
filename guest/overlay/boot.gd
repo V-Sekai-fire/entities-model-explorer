@@ -80,7 +80,7 @@ const CHECKER := [
 const CHART_W := 0.16
 const CHART_H := 0.107
 
-# Two charts standing beside the model, turned to face the camera: the top one is lit like the model (it shows what the
+# Two charts on one board standing beside the model: the top one is lit like the model (it shows what the
 # lights and ambient do), the bottom one is unshaded (it shows only the output transform:
 # tonemapper, sRGB encode, canvas). C shows or hides them. Patch centres are printed as
 # "CHART <lit|flat> <index> <x> <y>" so a test can read the screen at those pixels.
@@ -92,6 +92,17 @@ func _color_charts() -> Node3D:
 	var tex := ImageTexture.create_from_image(img)
 	var holder := Node3D.new()
 	holder.name = "ColorCharts"
+	var board := MeshInstance3D.new()
+	board.name = "board"
+	var bm := BoxMesh.new()
+	bm.size = Vector3(CHART_W * 1.12, CHART_H * 2.24, CHART_W * 0.04)
+	board.mesh = bm
+	var bmat := StandardMaterial3D.new()
+	bmat.albedo_color = Color(0.1, 0.1, 0.1)
+	bmat.roughness = 1.0
+	board.material_override = bmat
+	board.position = Vector3(0, 0, -CHART_W * 0.021)
+	holder.add_child(board)
 	for lit in [true, false]:
 		var mat := StandardMaterial3D.new()
 		mat.albedo_texture = tex
@@ -115,24 +126,12 @@ func _color_charts() -> Node3D:
 func _print_chart_points() -> void:
 	for mi in charts.get_children():
 		var m := mi as MeshInstance3D
+		if m.name == "board":
+			continue
 		for i in CHECKER.size():
 			var local := Vector3((float(i % 6) + 0.5) / 6.0 * CHART_W - CHART_W * 0.5, CHART_H * 0.5 - (float(i / 6) + 0.5) / 4.0 * CHART_H, 0.0)
 			var sp := chart_cam.unproject_position(m.global_transform * local)
 			print("CHART %s %d %d %d" % [m.name, i, int(sp.x), int(sp.y)])
-
-# Keep the charts beside the model: to its right as seen from the camera, clear of its widest
-# side, half its height, facing the camera (so the camera-mounted key light hits them as it
-# hits the model's front).
-func _process(_delta: float) -> void:
-	if not (charts and chart_cam and chart_cam.is_inside_tree()):
-		return
-	var cb := chart_cam.global_transform.basis.orthonormalized()
-	var h := maxf(model_box.size.y, 0.001)
-	var k := 0.5 * h / (2.2 * CHART_H)
-	var half_w := 0.5 * Vector2(model_box.size.x, model_box.size.z).length()
-	var side := half_w + 0.08 * h + 0.5 * CHART_W * k
-	var c := model_box.get_center()
-	charts.global_transform = Transform3D(cb.scaled(Vector3(k, k, k)), c + cb.x * side)
 
 func _measure_model() -> void:
 	var box := AABB()
@@ -147,6 +146,17 @@ func _measure_model() -> void:
 			first = false
 	if not first:
 		model_box = box
+	_place_charts()
+
+# The charts are a physical board in the world: it stands on the floor to the model's right
+# (+X), faces the front (+Z, where the camera starts), is half the model's height and stays put
+# when the camera orbits, like a real ColorChecker placed beside a subject in a photo.
+func _place_charts() -> void:
+	var h := maxf(model_box.size.y, 0.001)
+	var k := 0.5 * h / (2.2 * CHART_H)
+	var x := model_box.end.x + 0.08 * h + 0.6 * CHART_W * k
+	var y := model_box.position.y + 1.12 * CHART_H * k
+	charts.transform = Transform3D(Basis.IDENTITY.scaled(Vector3(k, k, k)), Vector3(x, y, model_box.get_center().z))
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	var k := event as InputEventKey

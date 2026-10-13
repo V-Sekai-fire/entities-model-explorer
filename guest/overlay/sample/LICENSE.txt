@@ -1,2 +1,3 @@
-godette.glb: "Godette" by SirRichard95, CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/).
-Copied from addons/renik/sample_models in V-Sekai-fire/entities-multiplayer-fabric-rx.
+sophia.glb: "Sophia" by GDQuest, from https://github.com/gdquest-demos/godot-4-3d-character-sophia
+(gdquest_sophia/model/sophia.glb). Licence: CC BY-NC-SA 4.0 (https://creativecommons.org/licenses/by-nc-sa/4.0/):
+credit GDQuest, non-commercial use only, share changes under the same licence.

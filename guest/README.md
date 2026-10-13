@@ -28,4 +28,4 @@ godot --headless --path <work dir> --export-release Web out/index.html
   the host.
 - On the web: Mobile renderer, no 2D MSAA, no physical light units.
 
-`overlay/sample/godette.glb`: "Godette" by SirRichard95, CC BY 3.0.
+`overlay/sample/sophia.glb`: "Sophia" by GDQuest, CC BY-NC-SA 4.0 (non-commercial; see `overlay/sample/LICENSE.txt`).

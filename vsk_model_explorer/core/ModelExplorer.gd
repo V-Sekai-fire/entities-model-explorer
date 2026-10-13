@@ -88,8 +88,13 @@ func _load_file(file_path: String):
 		for n in loaded_nodes:
 			n.queue_free()
 
-		worker = Worker.new(Callable(self, "_load_gltf").bind(normalized_path))
-		worker.start()
+		if OS.has_feature("web"):
+			# On the web the dropped file is deleted when files_dropped returns, and a guest
+			# script cannot be entered from a second thread, so load here, on this thread.
+			_load_gltf(normalized_path)
+		else:
+			worker = Worker.new(Callable(self, "_load_gltf").bind(normalized_path))
+			worker.start()
 		
 		gltf_start_to_load.emit()
 	elif ext == "fbx":

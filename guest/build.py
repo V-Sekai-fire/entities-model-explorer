@@ -46,6 +46,8 @@ pg = pg.replace('[rendering]\n\n', '[rendering]\n\nrenderer/rendering_method.web
 pg = pg.replace('lights_and_shadows/use_physical_light_units=true\n', 'lights_and_shadows/use_physical_light_units=false\n')
 # The web loading screen takes the boot splash colour: light, like the page, not black.
 pg = pg.replace('boot_splash/show_image=false\n', 'boot_splash/show_image=false\nboot_splash/bg_color=Color(0.93, 0.93, 0.92, 1)\n')
+# Never a black frame: the clear colour is light too, for any frame before the backdrop draws.
+pg = pg.replace('[rendering]\n\n', '[rendering]\n\nenvironment/defaults/default_clear_color=Color(0.93, 0.93, 0.92, 1)\n', 1)
 pgp.write_text(pg)
 
 files = sorted(p for p in work.rglob('*.gd') if '.godot' not in p.parts)

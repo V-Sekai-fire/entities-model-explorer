@@ -28,4 +28,4 @@ godot --headless --path <work dir> --export-release Web out/index.html
   the host.
 - On the web: Mobile renderer, no 2D MSAA, no physical light units.
 
-`overlay/sample/godette.glb`: "Godette" by SirRichard95, CC BY 3.0. Sample models must allow commercial use and must not be share-alike.
+`overlay/sample/mire.glb`: Mille "Mire" Feuille by Mohka Noir, Apache-2.0, converted from MireQuest.blend (see `overlay/sample/NOTICE.txt`). Sample models must allow commercial use and must not be share-alike.

@@ -4,7 +4,7 @@ extends Node
 # some browsers cannot draw: they show black), a sample model already loaded, and a one-line hint.
 const ModelExplorerScene = preload("res://vsk_model_explorer/scene/ModelExplorer_scene.gd")
 const ControlsCard = preload("res://controls_card.gd")
-const SAMPLE := "res://sample/godette.glb"
+const SAMPLE := "res://sample/mire.glb"
 const PAPER := Color(0.93, 0.93, 0.92)
 
 var hint: Label
@@ -31,7 +31,7 @@ func _ready() -> void:
 	hint = Label.new()
 	hint.add_theme_font_size_override("font_size", 13)
 	hint.add_theme_color_override("font_color", Color(0.13, 0.13, 0.13))
-	hint.text = "Sample: Godette by SirRichard95 (CC BY 3.0).   Drop your own .glb, .gltf or .vrm to view it."
+	hint.text = "Sample: Mire by Mohka Noir (Apache-2.0).   Drop your own .glb, .gltf or .vrm to view it."
 	var layer := CanvasLayer.new()
 	layer.layer = 10
 	layer.add_child(hint)

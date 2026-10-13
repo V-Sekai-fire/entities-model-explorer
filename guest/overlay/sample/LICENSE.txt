@@ -1,2 +1,0 @@
-godette.glb: "Godette" by SirRichard95, CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/).
-Copied from addons/renik/sample_models in V-Sekai-fire/entities-multiplayer-fabric-rx.

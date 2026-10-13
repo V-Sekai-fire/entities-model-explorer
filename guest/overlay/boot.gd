@@ -9,6 +9,8 @@ const PAPER := Color(0.93, 0.93, 0.92)
 
 var hint: Label
 var cam_rig: Node3D
+var charts: Node3D
+var chart_cam: Camera3D
 
 func _ready() -> void:
 	RenderingServer.set_default_clear_color(PAPER)
@@ -22,13 +24,20 @@ func _ready() -> void:
 	env.background_color = PAPER
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(1, 1, 1)
-	env.ambient_light_energy = 0.6
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.ambient_light_energy = 0.44
+	# Linear tonemap: an unshaded ColorChecker comes out byte-exact (Filmic lifted neutral 5 from
+	# 122 to 155). Ambient 0.44 + key light 0.73 sum to 1, so a lit chart facing the camera reads
+	# its reference values instead of 1.37x them (ambient 0.6 + key 1.0 made the overbright look).
+	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	we.environment = env
 	we.camera_attributes = null
 	var cam: Camera3D = root.get_node("CamController/CamRotHelper/Camera3D")
 	cam.attributes = null
+	(cam.get_node("DirectionalLight3D") as DirectionalLight3D).light_energy = 0.73
 	root.add_child(_backdrop())
+	charts = _color_charts()
+	cam.add_child(charts)
+	chart_cam = cam
 	# UIController's Grid export is never set in ModelExplorer.tscn, so Hide Grid did nothing.
 	root.get_node("Node").set("Grid", root.get_node("GizmoPlane"))
 	cam_rig = root.get_node("CamController/CamRotHelper")
@@ -59,6 +68,66 @@ func _ready() -> void:
 	await get_tree().process_frame
 	root.call("_load_file", SAMPLE)
 	print("BOOT built ", root.name, " sample=", SAMPLE)
+
+# X-Rite ColorChecker Classic, sRGB 8-bit (D65), row by row from dark skin to black.
+const CHECKER := [
+	[115, 82, 68], [194, 150, 130], [98, 122, 157], [87, 108, 67], [133, 128, 177], [103, 189, 170],
+	[214, 126, 44], [80, 91, 166], [193, 90, 99], [94, 60, 108], [157, 188, 64], [224, 163, 46],
+	[56, 61, 150], [70, 148, 73], [175, 54, 60], [231, 199, 31], [187, 86, 149], [8, 133, 161],
+	[243, 243, 242], [200, 200, 200], [160, 160, 160], [122, 122, 121], [85, 85, 85], [52, 52, 52],
+]
+const CHART_W := 0.16
+const CHART_H := 0.107
+
+# Two charts fixed in the camera's view: the top one is lit like the model (it shows what the
+# lights and ambient do), the bottom one is unshaded (it shows only the output transform:
+# tonemapper, sRGB encode, canvas). C shows or hides them. Patch centres are printed as
+# "CHART <lit|flat> <index> <x> <y>" so a test can read the screen at those pixels.
+func _color_charts() -> Node3D:
+	var img := Image.create(6 * 16, 4 * 16, false, Image.FORMAT_RGB8)
+	for i in CHECKER.size():
+		var c: Array = CHECKER[i]
+		img.fill_rect(Rect2i((i % 6) * 16 + 1, (i / 6) * 16 + 1, 14, 14), Color8(c[0], c[1], c[2]))
+	var tex := ImageTexture.create_from_image(img)
+	var holder := Node3D.new()
+	holder.name = "ColorCharts"
+	for lit in [true, false]:
+		var mat := StandardMaterial3D.new()
+		mat.albedo_texture = tex
+		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		mat.roughness = 1.0
+		mat.metallic_specular = 0.0
+		if not lit:
+			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		var quad := QuadMesh.new()
+		quad.size = Vector2(CHART_W, CHART_H)
+		var mi := MeshInstance3D.new()
+		mi.name = "lit" if lit else "flat"
+		mi.mesh = quad
+		mi.material_override = mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# Right of the model, between the Tool panel and the controls card (camera fov is about 38 deg).
+		mi.position = Vector3(0.23 if lit else 0.41, 0.1, -1.0)
+		holder.add_child(mi)
+	return holder
+
+func _print_chart_points() -> void:
+	for mi in charts.get_children():
+		var m := mi as MeshInstance3D
+		for i in CHECKER.size():
+			var local := Vector3((float(i % 6) + 0.5) / 6.0 * CHART_W - CHART_W * 0.5, CHART_H * 0.5 - (float(i / 6) + 0.5) / 4.0 * CHART_H, 0.0)
+			var sp := chart_cam.unproject_position(m.global_transform * local)
+			print("CHART %s %d %d %d" % [m.name, i, int(sp.x), int(sp.y)])
+
+# CamController scales the camera rig to the model's size; undo it so the charts keep one size on screen.
+func _process(_delta: float) -> void:
+	if charts and chart_cam and chart_cam.is_inside_tree():
+		charts.scale = Vector3.ONE / chart_cam.global_transform.basis.get_scale()
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	var k := event as InputEventKey
+	if k and k.pressed and not k.echo and k.keycode == KEY_C:
+		charts.visible = not charts.visible
 
 var loads := 0
 var wire_on := false
@@ -175,6 +244,7 @@ func _on_loaded(ok: bool, _scene) -> void:
 		hint.text = "That file could not be opened. Try a .glb, .gltf or .vrm."
 		return
 	loads += 1
+	get_tree().create_timer(1.0).timeout.connect(_print_chart_points)
 	# The camera starts level with the floor grid, which then shows edge-on as nothing; look down a
 	# little so the grid is visible. Deferred: CamController resets the pitch on the same signal.
 	cam_rig.set_deferred("rotation", Vector3(deg_to_rad(-12.0), 0.0, 0.0))

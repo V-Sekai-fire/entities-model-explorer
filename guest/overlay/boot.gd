@@ -148,15 +148,16 @@ func _measure_model() -> void:
 		model_box = box
 	_place_charts()
 
-# The charts are a physical board in the world: it stands on the floor to the model's right
-# (+X), faces the front (+Z, where the camera starts), is half the model's height and stays put
-# when the camera orbits, like a real ColorChecker placed beside a subject in a photo.
+# The charts are a physical board in the world: it lies flat on the floor to the model's right
+# (+X), face up, lit chart toward the back, and stays put when the camera orbits, like a real
+# ColorChecker laid down beside a subject in a photo.
 func _place_charts() -> void:
 	var h := maxf(model_box.size.y, 0.001)
 	var k := 0.5 * h / (2.2 * CHART_H)
 	var x := model_box.end.x + 0.08 * h + 0.6 * CHART_W * k
-	var y := model_box.position.y + 1.12 * CHART_H * k
-	charts.transform = Transform3D(Basis.IDENTITY.scaled(Vector3(k, k, k)), Vector3(x, y, model_box.get_center().z))
+	var y := model_box.position.y + 0.05 * CHART_W * k
+	var flat := Basis(Vector3.RIGHT, -PI / 2)
+	charts.transform = Transform3D(flat.scaled(Vector3(k, k, k)), Vector3(x, y, model_box.get_center().z))
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	var k := event as InputEventKey

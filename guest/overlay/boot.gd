@@ -3,6 +3,7 @@ extends Node
 # makes the first visit friendly: a light studio background instead of the procedural sky (which
 # some browsers cannot draw: they show black), a sample model already loaded, and a one-line hint.
 const ModelExplorerScene = preload("res://vsk_model_explorer/scene/ModelExplorer_scene.gd")
+const ControlsCard = preload("res://controls_card.gd")
 const SAMPLE := "res://sample/sophia.glb"
 const PAPER := Color(0.93, 0.93, 0.92)
 
@@ -28,14 +29,19 @@ func _ready() -> void:
 	msg.visible = false
 	get_tree().root.add_child.call_deferred(root)
 	hint = Label.new()
-	hint.add_theme_font_size_override("font_size", 15)
+	hint.add_theme_font_size_override("font_size", 13)
 	hint.add_theme_color_override("font_color", Color(0.13, 0.13, 0.13))
-	hint.text = "Sample: Sophia by GDQuest (CC BY-NC-SA 4.0).   Drop your own .glb, .gltf or .vrm anywhere here to view it."
+	hint.text = "Sample: Sophia by GDQuest (CC BY-NC-SA 4.0).   Drop your own .glb, .gltf or .vrm to view it."
 	var layer := CanvasLayer.new()
 	layer.layer = 10
 	layer.add_child(hint)
 	add_child(layer)
-	hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 20)
+	# Bottom left, clear of the information panel (300 px) and of the controls card on the right.
+	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, 20)
+	hint.position.x = 320
+	var card: Control = ControlsCard.new()
+	layer.add_child(card)
+	card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
 	root.gltf_is_loaded.connect(_on_loaded)
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -79,4 +85,4 @@ func _on_loaded(ok: bool, _scene) -> void:
 		return
 	loads += 1
 	if loads > 1:
-		hint.text = "Drag to turn the model, scroll to zoom. Drop another .glb, .gltf or .vrm to replace it."
+		hint.text = "Drop another .glb, .gltf or .vrm to replace it."

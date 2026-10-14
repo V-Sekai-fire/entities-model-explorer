@@ -13,8 +13,8 @@ threaded double-precision web export template with WebGPU.
 
 ```sh
 python3 guest/build.py <work dir> <gdscript_to_riscv> <addons/godot_sandbox> <web template zip>
-godot --headless --path <work dir> --import
-godot --headless --path <work dir> --export-release Web out/index.html
+godot --resolution 640x360 --path <work dir> --import
+godot --resolution 640x360 --path <work dir> --export-release Web out/index.html
 ```
 
 ## What the build changes

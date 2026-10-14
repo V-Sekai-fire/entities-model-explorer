@@ -6,7 +6,7 @@ exported game ships no GDScript and no scene files.
 
     python3 guest/build.py <work dir> <gdscript_to_riscv> <godot_sandbox addon dir> <web template zip>
 
-Then export the work dir: godot --headless --path <work dir> --export-release Web out/index.html
+Then export the work dir: godot --resolution 640x360 --path <work dir> --export-release Web out/index.html
 Prints one line per script and a summary; exit 1 if any script fails.
 """
 import json, pathlib, re, shutil, subprocess, sys, concurrent.futures

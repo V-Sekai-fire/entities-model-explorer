@@ -1037,5 +1037,6 @@ func _import_post(gstate: GLTFState, node: Node) -> Error:
 
 	var vrm_meta: Resource = _create_meta(root_node, animplayer, vrm_extension, gstate, skeleton, humanBones, human_bone_to_idx, pose_diffs)
 	root_node.set("vrm_meta", vrm_meta)
+	vrm_utils.refresh_global_poses(skeleton)
 
 	return OK

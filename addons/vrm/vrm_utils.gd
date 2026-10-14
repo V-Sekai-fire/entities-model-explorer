@@ -323,6 +323,16 @@ static func apply_mesh_rotation(p_base_scene: Node, src_skeleton: Skeleton3D, ol
 		src_skeleton.set_bone_pose_scale(i, fixed_rest.basis.get_scale())
 
 
+# Godot's Skeleton3D caches each bone's global pose and, while the skeleton is outside the scene
+# tree, set_bone_pose_* does not mark that cache stale. An editor import never sees the stale
+# cache because the scene is saved and loaded again; a runtime import keeps the live skeleton, so
+# limbs whose cache was filled before their final pose was set draw with the old pose. Setting a
+# root bone's rest marks its whole subtree stale, so call this after the last pose change.
+static func refresh_global_poses(skeleton: Skeleton3D) -> void:
+	for bone_idx in skeleton.get_parentless_bones():
+		skeleton.set_bone_rest(bone_idx, skeleton.get_bone_rest(bone_idx))
+
+
 static func perform_retarget(gstate: GLTFState, root_node: Node, skeleton: Skeleton3D, bone_map: BoneMap) -> Array[Basis]:
 	var skeletonPath: NodePath = root_node.get_path_to(skeleton)
 	var global_transform_scale_local: Vector3 = apply_node_transforms(root_node, skeleton)

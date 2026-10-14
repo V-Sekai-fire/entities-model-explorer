@@ -28,4 +28,12 @@ godot --headless --path <work dir> --export-release Web out/index.html
   the host.
 - On the web: Mobile renderer, no 2D MSAA, no physical light units.
 
+## Shader warm-up (export pipeline only)
+
+When the page args contain `--warmup` (copy `index.html` to `warmup.html` with
+`"args":["--warmup"]`), `boot.gd` draws one small sphere per StandardMaterial3D shader key the glTF
+importer produces, waits 30 frames, prints every file under `user://shader_cache` as
+`SCF <path> <part> <parts> <hex>` console lines, then prints `WARMUP done`. A harvester joins the
+lines back into files. Normal visits never pass `--warmup`, so they do not run this code.
+
 `overlay/sample/mire.glb`: Mille "Mire" Feuille by Mohka Noir, Apache-2.0, converted from MireQuest.blend (see `overlay/sample/NOTICE.txt`). Sample models must allow commercial use and must not be share-alike.

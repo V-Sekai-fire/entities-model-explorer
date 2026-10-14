@@ -286,3 +286,79 @@ func _on_loaded(ok: bool, _scene) -> void:
 	cam_rig.set_deferred("rotation", Vector3(deg_to_rad(-12.0), 0.0, 0.0))
 	if loads > 1:
 		hint.text = "Drop another .glb, .gltf or .vrm to replace it."
+	if loads == 1 and "--warmup" in OS.get_cmdline_args():
+		_warmup()
+
+# Shader warm-up, run only by the export pipeline (page arg --warmup). Every material shader is
+# converted GLSL -> SPIR-V -> WGSL in the browser the first time it draws, which is most of a cold
+# start. So the pipeline opens the page once per browser, draws one small sphere for each
+# StandardMaterial3D shader key the glTF importer produces (textures are not part of the key), then
+# dumps user://shader_cache to the console as SCF lines. A harvester writes those lines back to
+# files. Shipping them in the pck is not done yet. Mods and dropped models hit the same keys.
+func _warmup_materials() -> Array:
+	var out := []
+	for rough_g in [false, true]:
+		for normal in [false, true]:
+			for emission in [false, true]:
+				for scissor in [false, true]:
+					out.append(_std(rough_g, normal, false, emission, scissor, false))
+	for normal in [false, true]:
+		for scissor in [false, true]:
+			out.append(_std(true, normal, true, false, scissor, false))
+			out.append(_std(true, normal, false, false, scissor, true))
+	for cull_off in [false, true]:
+		for scissor in [false, true]:
+			var u := StandardMaterial3D.new()
+			u.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			u.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR if scissor else BaseMaterial3D.TRANSPARENCY_DISABLED
+			u.cull_mode = BaseMaterial3D.CULL_DISABLED if cull_off else BaseMaterial3D.CULL_BACK
+			out.append(u)
+	var vc := StandardMaterial3D.new()
+	vc.vertex_color_use_as_albedo = true
+	out.append(vc)
+	return out
+
+func _std(rough_g: bool, normal: bool, ao: bool, emission: bool, scissor: bool, cull_off: bool) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	if rough_g:
+		m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
+	m.normal_enabled = normal
+	m.ao_enabled = ao
+	if emission:
+		m.emission_enabled = true
+		m.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
+	if scissor:
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	if cull_off:
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return m
+
+func _warmup() -> void:
+	var mats := _warmup_materials()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.004
+	sphere.height = 0.008
+	for i in mats.size():
+		var mi := MeshInstance3D.new()
+		mi.mesh = sphere
+		mi.material_override = mats[i]
+		mi.position = Vector3(-0.1 + 0.012 * (i % 16), 0.03 - 0.012 * (i / 16), -0.5)
+		chart_cam.add_child(mi)
+	print("WARMUP materials=", mats.size())
+	for i in 30:
+		await get_tree().process_frame
+	_dump_dir("user://shader_cache", "")
+	print("WARMUP done")
+
+func _dump_dir(path: String, rel: String) -> void:
+	var d := DirAccess.open(path)
+	if d == null:
+		return
+	for f in d.get_files():
+		var hex: String = FileAccess.get_file_as_bytes(path.path_join(f)).hex_encode()
+		var n := (hex.length() + 7999) / 8000
+		for i in n:
+			print("SCF ", rel.path_join(f), " ", i, " ", n, " ", hex.substr(i * 8000, 8000))
+	for sub in d.get_directories():
+		_dump_dir(path.path_join(sub), rel.path_join(sub))
+

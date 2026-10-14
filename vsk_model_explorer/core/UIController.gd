@@ -26,6 +26,7 @@ var meshViewer
 const DYNAMIC_CONTROL_GROUP = "dynamic control"
 
 var maxAabb:AABB
+var exploder = preload("res://addons/model_explode/explode.gd").new()
 
 
 func _ready():
@@ -69,6 +70,9 @@ func _on_root_gltf_start_to_load():
 
 func _on_root_gltf_is_loaded(success, gltf : Node):
 	Input.action_press("close_popup")
+	if exploder.is_exploded():
+		exploder.implode()
+		CbExplode.set_pressed_no_signal(false)
 	if not success:
 		MsgLabel.text = "Failed to load model..."
 		MsgPanel.visible = true
@@ -469,19 +473,15 @@ func _show_texture_viewer(tex):
 
 
 func _on_cb_explode_toggled(button_pressed):
-	var nodes = []
-	nodes.append_array(get_tree().get_nodes_in_group(GlobalSignal.FBX_GROUP))
-	nodes.append_array(get_tree().get_nodes_in_group(GlobalSignal.GLTF_GROUP))
-	
-	for n in nodes:
-		var meshes:Array[Node] = n.find_children("*", "MeshInstance3D")
-		for m in meshes:
-			m = m as MeshInstance3D
-
-			if button_pressed:
-				m.position = m.mesh.get_aabb().get_center() - maxAabb.get_center()
-			else:
-				m.position = Vector3.ZERO
+	# addons/model_explode: pieces split by surface, moved apart so that no two intersect.
+	if button_pressed:
+		var nodes = []
+		nodes.append_array(get_tree().get_nodes_in_group(GlobalSignal.FBX_GROUP))
+		nodes.append_array(get_tree().get_nodes_in_group(GlobalSignal.GLTF_GROUP))
+		exploder.explode(nodes, get_tree().current_scene)
+		exploder.print_layout()
+	else:
+		exploder.implode()
 
 
 func _on_cb_hide_grid_toggled(button_pressed):

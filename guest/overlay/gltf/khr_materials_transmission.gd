@@ -15,6 +15,8 @@ extends GLTFDocumentExtension
 # samples the screen where it leaves; the light is absorbed on the way by Beer-Lambert:
 # attenuationColor ^ (distance / attenuationDistance). This follows the Khronos glTF sample
 # viewer's approximation: one refraction, thickness taken from the material, not ray marched.
+# Fresnel follows the glTF spec: 1 - F (Schlick, F0 from the IOR) of the light enters, at one
+# interface; a reference path tracer that also counts the exit interface reads about 4% darker.
 #
 # Limits: objects that are themselves transparent do not show through, because the screen
 # texture is copied after the opaque pass; a refracted ray that leaves the screen reads the edge.
@@ -98,10 +100,16 @@ void fragment() {
 	if (dist > 0.0 && attenuation_distance > 0.0) {
 		absorb = pow(max(attenuation_color, vec3(1e-4)), vec3(dist / attenuation_distance));
 	}
+	// glTF spec: the dielectric layer reflects F (Schlick, F0 from the IOR) and only 1 - F of the
+	// light enters, at the one interface the spec models. Godot's own specular lobe draws the
+	// reflected part: SPECULAR is set so its F0 (0.16 * SPECULAR^2) equals the glTF F0.
+	float f0 = pow((ior - 1.0) / (ior + 1.0), 2.0);
+	float fresnel = f0 + (1.0 - f0) * pow(1.0 - clamp(dot(normalize(NORMAL), VIEW), 0.0, 1.0), 5.0);
 	ALBEDO = base.rgb * (1.0 - t);
 	METALLIC = metal;
 	ROUGHNESS = rough;
-	EMISSION = emission * emission_energy * texture(emission_tex, UV).rgb + behind * absorb * base.rgb * t;
+	SPECULAR = sqrt(f0 / 0.16);
+	EMISSION = emission * emission_energy * texture(emission_tex, UV).rgb + behind * absorb * base.rgb * t * (1.0 - fresnel);
 }
 """
 

@@ -4,6 +4,7 @@ extends Node
 # some browsers cannot draw: they show black), a sample model already loaded, and a one-line hint.
 const ModelExplorerScene = preload("res://vsk_model_explorer/scene/ModelExplorer_scene.gd")
 const ControlsCard = preload("res://controls_card.gd")
+const KhrTransmission = preload("res://gltf/khr_materials_transmission.gd")
 const SAMPLE := "res://sample/mire.glb"
 const PAPER := Color(0.93, 0.93, 0.92)
 
@@ -14,6 +15,8 @@ var chart_cam: Camera3D
 var model_box := AABB(Vector3(-0.5, 0, -0.5), Vector3(1, 1, 1))
 
 func _ready() -> void:
+	# glTF files that require KHR_materials_transmission (glass) were refused by the importer.
+	GLTFDocument.register_gltf_document_extension(KhrTransmission.new())
 	RenderingServer.set_default_clear_color(PAPER)
 	# Wireframe view needs wireframe index buffers, which Godot only builds for meshes created after
 	# this is on (the editor turns it on; an exported game does not), so the W tool drew nothing.

@@ -36,4 +36,16 @@ importer produces, waits 30 frames, prints every file under `user://shader_cache
 `SCF <path> <part> <parts> <hex>` console lines, then prints `WARMUP done`. A harvester joins the
 lines back into files. Normal visits never pass `--warmup`, so they do not run this code.
 
+## See-through materials (glTF transmission)
+
+`overlay/gltf/khr_materials_transmission.gd` is a GLTFDocumentExtension that `boot.gd` registers at
+start. It claims `KHR_materials_transmission`, `KHR_materials_volume` and `KHR_materials_ior`, so files
+that list them under `extensionsRequired` (Khronos CommercialRefrigerator) import instead of being
+refused. Each glTF material with a transmission factor above 0 becomes a ShaderMaterial (the shader
+code is a string in the script) that copies the importer's StandardMaterial3D and adds the scene
+behind it from Godot's screen texture, tinted by the base colour and blurred by roughness. With a
+volume, the view ray is refracted once (IOR), walks the material thickness and is absorbed by
+Beer-Lambert (attenuationColor, attenuationDistance), as in the Khronos sample viewer. Transparent
+objects behind the glass do not show through it (the screen copy is taken after the opaque pass).
+
 `overlay/sample/mire.glb`: Mille "Mire" Feuille by Mohka Noir, Apache-2.0, converted from MireQuest.blend (see `overlay/sample/NOTICE.txt`). Sample models must allow commercial use and must not be share-alike.

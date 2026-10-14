@@ -2,11 +2,13 @@ extends Control
 
 class_name CustomCanvas
 
-var _drawData;
+var _drawData
+
 
 func set_draw_data(data):
 	_drawData = data
 	queue_redraw()
+
 
 func _draw():
 	if _drawData is ImageTexture:

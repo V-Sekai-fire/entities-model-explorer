@@ -19,20 +19,20 @@ extends RefCounted
 # through each other.
 
 const WIRE_GROUP := "vsk_web_wire"
-const GAP := 0.03     # minimum distance between boxes, as a share of the model radius
+const GAP := 0.03  # minimum distance between boxes, as a share of the model radius
 const MOVE_TIME := 0.35
 # Placement works with a gap slightly above GAP: candidates aim at AIM x gap, a spot counts as
 # free at KEEP x gap; float32 rounding (about 1e-7 of the model size) stays far below the margin.
 const AIM := 1.002
 const KEEP := 1.001
 
-var root: Node3D             # holds the piece copies while exploded
-var hidden: Array = []       # nodes this script hid, restored by implode()
-var centres: Array = []      # world box centres (Vector3)
-var halves: Array = []       # world box half extents (Vector3)
-var dirs: Array = []         # directions (Vector3)
-var pieces: Array = []       # MeshInstance3D copies
-var moves: Array = []       # how far each piece moves along its direction (float)
+var root: Node3D  # holds the piece copies while exploded
+var hidden: Array = []  # nodes this script hid, restored by implode()
+var centres: Array = []  # world box centres (Vector3)
+var halves: Array = []  # world box half extents (Vector3)
+var dirs: Array = []  # directions (Vector3)
+var pieces: Array = []  # MeshInstance3D copies
+var moves: Array = []  # how far each piece moves along its direction (float)
 var gap := 0.0
 
 
@@ -69,7 +69,11 @@ func explode(models: Array, parent: Node, animate := true) -> void:
 		box = sb if first else box.merge(sb)
 		first = false
 	var cell := maxf(maxf(box.size.x, box.size.y), box.size.z) / float(CELLS)
-	var counts := Vector3i(clampi(ceili(box.size.x / cell - 1e-6), 1, CELLS), clampi(ceili(box.size.y / cell - 1e-6), 1, CELLS), clampi(ceili(box.size.z / cell - 1e-6), 1, CELLS))
+	var counts := Vector3i(
+		clampi(ceili(box.size.x / cell - 1e-6), 1, CELLS),
+		clampi(ceili(box.size.y / cell - 1e-6), 1, CELLS),
+		clampi(ceili(box.size.z / cell - 1e-6), 1, CELLS)
+	)
 	for e in surfs:
 		var parts: Array = [e[0]]
 		if int(e[1]) == Mesh.PRIMITIVE_TRIANGLES and cell > 0.0:
@@ -83,7 +87,13 @@ func explode(models: Array, parent: Node, animate := true) -> void:
 		var p: MeshInstance3D = pieces[i]
 		var target: Vector3 = p.global_position + (dirs[i] as Vector3) * float(moves[i])
 		if animate:
-			p.create_tween().tween_property(p, "global_position", target, MOVE_TIME).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			(
+				p
+				. create_tween()
+				. tween_property(p, "global_position", target, MOVE_TIME)
+				. set_trans(Tween.TRANS_CUBIC)
+				. set_ease(Tween.EASE_OUT)
+			)
 		else:
 			p.global_position = target
 
@@ -134,7 +144,15 @@ func _collect(mi: MeshInstance3D, surfs: Array) -> void:
 		arrays[Mesh.ARRAY_WEIGHTS] = null
 		for c in [Mesh.ARRAY_CUSTOM0, Mesh.ARRAY_CUSTOM1, Mesh.ARRAY_CUSTOM2, Mesh.ARRAY_CUSTOM3]:
 			arrays[c] = null
-		surfs.append([arrays, src.surface_get_primitive_type(s), mi.get_active_material(s), mi.global_transform, "%s_%d" % [mi.name, s]])
+		surfs.append(
+			[
+				arrays,
+				src.surface_get_primitive_type(s),
+				mi.get_active_material(s),
+				mi.global_transform,
+				"%s_%d" % [mi.name, s]
+			]
+		)
 
 
 func _surface_aabb(arrays: Array) -> AABB:
@@ -143,7 +161,7 @@ func _surface_aabb(arrays: Array) -> AABB:
 	var lo: Vector3 = (bl[0] as PackedVector3Array)[0]
 	var hi: Vector3 = lo
 	for blk in bl:
-		for p in (blk as PackedVector3Array):
+		for p in blk as PackedVector3Array:
 			lo = lo.min(p)
 			hi = hi.max(p)
 	return AABB(lo, hi - lo)
@@ -173,7 +191,7 @@ func _emit(prim: int, arrays: Array, mat: Material, xform: Transform3D, piece_na
 # window over 4096 elements, so large arrays are read through blocks of at most BLOCK elements
 # (`_blocks`, read as blocks[i / BLOCK][i % BLOCK]) and built with append only.
 
-const CELLS := 3     # grid cells along the model's longest side
+const CELLS := 3  # grid cells along the model's longest side
 const BLOCK := 4092  # a multiple of 3 (triangles) and of 4 (tangents)
 
 
@@ -189,7 +207,9 @@ func _blocks(arr) -> Array:
 
 # Splits one triangle surface by the world grid (origin, cell size, counts): each triangle goes to
 # the cell of its world-space centroid. Returns surface arrays, one per non-empty cell.
-func _split_grid(arrays: Array, xform: Transform3D, origin: Vector3, cell: float, counts: Vector3i) -> Array:
+func _split_grid(
+	arrays: Array, xform: Transform3D, origin: Vector3, cell: float, counts: Vector3i
+) -> Array:
 	var pos: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var idx: PackedInt32Array = PackedInt32Array()
 	if arrays[Mesh.ARRAY_INDEX] != null:
@@ -210,7 +230,11 @@ func _split_grid(arrays: Array, xform: Transform3D, origin: Vector3, cell: float
 				var v: int = blk[t + k]
 				cen += (pos_b[v / BLOCK] as PackedVector3Array)[v % BLOCK]
 			var g: Vector3 = (xform * (cen / 3.0) - origin) / cell
-			var key := Vector3i(clampi(int(floor(g.x)), 0, counts.x - 1), clampi(int(floor(g.y)), 0, counts.y - 1), clampi(int(floor(g.z)), 0, counts.z - 1))
+			var key := Vector3i(
+				clampi(int(floor(g.x)), 0, counts.x - 1),
+				clampi(int(floor(g.y)), 0, counts.y - 1),
+				clampi(int(floor(g.z)), 0, counts.z - 1)
+			)
 			if not cell_of.has(key):
 				cell_of[key] = cell_of.size()
 			tri_group.append(cell_of[key])
@@ -222,7 +246,9 @@ func _split_grid(arrays: Array, xform: Transform3D, origin: Vector3, cell: float
 
 # Builds one surface per group from the triangles whose tri_group entry names it, copying every
 # per-vertex array the surface has and renumbering the vertices it uses.
-func _gather(arrays: Array, pos_b: Array, idx_b: Array, tri_group: PackedInt32Array, ng: int) -> Array:
+func _gather(
+	arrays: Array, pos_b: Array, idx_b: Array, tri_group: PackedInt32Array, ng: int
+) -> Array:
 	var remap: Array = []
 	var verts: Array = []
 	var tris: Array = []
@@ -317,7 +343,9 @@ func _layout() -> void:
 	var keys: Array = []
 	for i in n:
 		var d: float = ((centres[i] as Vector3) - centre).length()
-		var vol: float = (halves[i] as Vector3).x * (halves[i] as Vector3).y * (halves[i] as Vector3).z
+		var vol: float = (
+			(halves[i] as Vector3).x * (halves[i] as Vector3).y * (halves[i] as Vector3).z
+		)
 		keys.append([d, -vol, i])
 	keys.sort()
 	var c2: Array = []
@@ -336,7 +364,11 @@ func _layout() -> void:
 	var placed: Array = []
 	for i in n:
 		var off: Vector3 = (centres[i] as Vector3) - centre
-		var v: Vector3 = off.normalized() * radius if off.length() > 1e-6 * radius else _spread_dir(i, n) * radius
+		var v: Vector3 = (
+			off.normalized() * radius
+			if off.length() > 1e-6 * radius
+			else _spread_dir(i, n) * radius
+		)
 		dirs.append(v)
 		var t := _place(centres[i], halves[i], v, placed)
 		moves.append(t)
@@ -404,5 +436,10 @@ func print_layout() -> void:
 		var c: Vector3 = centres[i]
 		var h: Vector3 = halves[i]
 		var v: Vector3 = dirs[i]
-		print("EXPLODE piece %.17f %.17f %.17f %.17f %.17f %.17f %.17f %.17f %.17f %.17f" % [c.x, c.y, c.z, h.x, h.y, h.z, v.x, v.y, v.z, moves[i]])
+		print(
+			(
+				"EXPLODE piece %.17f %.17f %.17f %.17f %.17f %.17f %.17f %.17f %.17f %.17f"
+				% [c.x, c.y, c.z, h.x, h.y, h.z, v.x, v.y, v.z, moves[i]]
+			)
+		)
 	print("EXPLODE end %d" % centres.size())

@@ -51,10 +51,11 @@ func create_runtime(secondary_node: Node3D, skeleton: Skeleton3D) -> VrmCollider
 	if node == null and bone != "":
 		bone_idx = skeleton.find_bone(bone)
 	if node == null and bone_idx == -1:
-		push_warning("spring collider: Unable to locate bone " + str(bone) + " or node " + str(node_path))
+		push_warning(
+			"spring collider: Unable to locate bone " + str(bone) + " or node " + str(node_path)
+		)
 		node = secondary_node
 	return VrmColliderRuntime.new(self, bone_idx, node)
-
 
 #func _ready(ready_parent: Node3D, ready_skel: Object):
 #	self.parent = ready_parent

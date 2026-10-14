@@ -4,6 +4,8 @@ extends Node3D
 
 const spring_bone_class = preload("./vrm_spring_bone.gd")
 const collider_class = preload("./vrm_collider.gd")
+const VrmColliderRuntime = preload("./vrm_collider_runtime.gd")
+const SpringBoneRuntimeState = preload("./vrm_spring_bone_runtime.gd")
 const collider_group_class = preload("./vrm_collider_group.gd")
 
 
@@ -92,10 +94,10 @@ var internal_modifier_node: Node3D
 
 # Props
 
-var spring_bones_internal: Array[spring_bone_class.SpringBoneRuntimeState]
+var spring_bones_internal: Array[SpringBoneRuntimeState]
 var springs_centers: PackedInt32Array
 
-var colliders_internal: Array[collider_class.VrmRuntimeCollider]
+var colliders_internal: Array[VrmColliderRuntime]
 var colliders_centers: PackedInt32Array
 var center_bones: PackedInt32Array
 var center_nodes: Array[Node3D]
@@ -199,7 +201,7 @@ func _ready() -> void:
 			center_key = spring_bone.center_node
 		var center_idx: int = center_to_index[center_key]
 
-		var tmp_colliders: Array[collider_class.VrmRuntimeCollider] = []
+		var tmp_colliders: Array[VrmColliderRuntime] = []
 		for collider_group in spring_bone.collider_groups:
 			if not seen_collider_groups.has(collider_group):
 				seen_collider_groups[collider_group] = true
@@ -210,7 +212,7 @@ func _ready() -> void:
 					collider_library.append(collider)
 				if not collider.recreate_collider.is_connected(self._on_recreate_collider):
 					collider.recreate_collider.connect(self._on_recreate_collider) # Rebuild everything if anything changes.
-				var collider_runtime: collider_class.VrmRuntimeCollider
+				var collider_runtime: VrmColliderRuntime
 				if center_key not in center_to_collider_to_internal:
 					center_to_collider_to_internal[center_key] = {}
 				if center_to_collider_to_internal[center_key].has(collider):

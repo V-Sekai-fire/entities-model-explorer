@@ -2,9 +2,36 @@ extends RefCounted
 
 const ROTATE_180_BASIS = Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, -1))
 const ROTATE_180_TRANSFORM = Transform3D(ROTATE_180_BASIS, Vector3.ZERO)
+const FLIP_X_2D = Transform2D(Vector2(-1, 0), Vector2(0, 1), Vector2.ZERO)
 
 const vrm_constants_class = preload("./vrm_constants.gd")
 const importer_mesh_attributes = preload("./importer_mesh_attributes.gd")
+
+# Turns one surface's (or blend shape's) arrays 180 degrees about Y: x and z of every vertex,
+# normal and tangent change sign. Each array goes through one engine operator call instead of a
+# loop per element, so when this runs as a sandbox guest its instruction count does not grow
+# with the vertex count and a large model stays inside the sandbox's instruction limit.
+static func _rotate_arrays_180(arr: Array) -> Array:
+	arr[ArrayMesh.ARRAY_VERTEX] = ROTATE_180_TRANSFORM * (arr[ArrayMesh.ARRAY_VERTEX] as PackedVector3Array)
+	if typeof(arr[ArrayMesh.ARRAY_NORMAL]) == TYPE_PACKED_VECTOR3_ARRAY:
+		arr[ArrayMesh.ARRAY_NORMAL] = ROTATE_180_TRANSFORM * (arr[ArrayMesh.ARRAY_NORMAL] as PackedVector3Array)
+	if typeof(arr[ArrayMesh.ARRAY_TANGENT]) == TYPE_PACKED_FLOAT32_ARRAY:
+		arr[ArrayMesh.ARRAY_TANGENT] = _rotate_tangents_180(arr[ArrayMesh.ARRAY_TANGENT])
+	return arr
+
+
+# Tangents are x, y, z, w floats. Read as (x, y), (z, w) pairs, turning them means negating the
+# first value of every pair, which FLIP_X_2D does to a whole PackedVector2Array at once. A
+# Vector2 holds real_t, so in a double-precision build the floats are widened first (exact)
+# and narrowed after (exact, as only signs changed).
+static func _rotate_tangents_180(tangents: PackedFloat32Array) -> PackedFloat32Array:
+	if PackedVector2Array([Vector2()]).to_byte_array().size() == 8:
+		var pairs: PackedVector2Array = FLIP_X_2D * tangents.to_byte_array().to_vector2_array()
+		return pairs.to_byte_array().to_float32_array()
+	var wide: PackedFloat64Array = PackedFloat64Array(Array(tangents))
+	var wide_pairs: PackedVector2Array = FLIP_X_2D * wide.to_byte_array().to_vector2_array()
+	return PackedFloat32Array(Array(wide_pairs.to_byte_array().to_float64_array()))
+
 
 static func adjust_mesh_zforward(mesh: ImporterMesh, blendshapes: Array):
 	# MESH and SKIN data divide, to compensate for object position multiplying.
@@ -21,33 +48,9 @@ static func adjust_mesh_zforward(mesh: ImporterMesh, blendshapes: Array):
 			bsarr.append(mesh.get_surface_blend_shape_arrays(surf_idx, bsidx))
 		var lods: Dictionary = {}  # mesh.surface_get_lods(surf_idx) # get_lods(mesh, surf_idx)
 		var mat: Material = mesh.get_surface_material(surf_idx)
-		var vert_arr_len: int = len(arr[ArrayMesh.ARRAY_VERTEX])
-		var vertarr: PackedVector3Array = arr[ArrayMesh.ARRAY_VERTEX]
-		var invert_vector = Vector3(-1, 1, -1)
-		for i in range(vert_arr_len):
-			vertarr[i] = invert_vector * vertarr[i]
-		if typeof(arr[ArrayMesh.ARRAY_NORMAL]) == TYPE_PACKED_VECTOR3_ARRAY:
-			var normarr: PackedVector3Array = arr[ArrayMesh.ARRAY_NORMAL]
-			for i in range(vert_arr_len):
-				normarr[i] = invert_vector * normarr[i]
-		if typeof(arr[ArrayMesh.ARRAY_TANGENT]) == TYPE_PACKED_FLOAT32_ARRAY:
-			var tangarr: PackedFloat32Array = arr[ArrayMesh.ARRAY_TANGENT]
-			for i in range(vert_arr_len):
-				tangarr[i * 4] = -tangarr[i * 4]
-				tangarr[i * 4 + 2] = -tangarr[i * 4 + 2]
+		arr = _rotate_arrays_180(arr)
 		for bsidx in range(len(bsarr)):
-			vertarr = bsarr[bsidx][ArrayMesh.ARRAY_VERTEX]
-			for i in range(vert_arr_len):
-				vertarr[i] = invert_vector * vertarr[i]
-			if typeof(bsarr[bsidx][ArrayMesh.ARRAY_NORMAL]) == TYPE_PACKED_VECTOR3_ARRAY:
-				var normarr: PackedVector3Array = bsarr[bsidx][ArrayMesh.ARRAY_NORMAL]
-				for i in range(vert_arr_len):
-					normarr[i] = invert_vector * normarr[i]
-			if typeof(bsarr[bsidx][ArrayMesh.ARRAY_TANGENT]) == TYPE_PACKED_FLOAT32_ARRAY:
-				var tangarr: PackedFloat32Array = bsarr[bsidx][ArrayMesh.ARRAY_TANGENT]
-				for i in range(vert_arr_len):
-					tangarr[i * 4] = -tangarr[i * 4]
-					tangarr[i * 4 + 2] = -tangarr[i * 4 + 2]
+			bsarr[bsidx] = _rotate_arrays_180(bsarr[bsidx])
 			bsarr[bsidx].resize(ArrayMesh.ARRAY_MAX)
 
 		surf_data_by_mesh.push_back({"prim": prim, "arr": arr, "bsarr": bsarr, "lods": lods, "fmt_compress_flags": fmt_compress_flags, "name": name, "mat": mat})

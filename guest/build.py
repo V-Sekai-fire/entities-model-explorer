@@ -17,7 +17,7 @@ work, compiler, addon, template = (pathlib.Path(x).resolve() for x in sys.argv[1
 overlay = here / 'overlay'
 if work.exists():
     shutil.rmtree(work)
-shutil.copytree(src, work, ignore=shutil.ignore_patterns('.git', '.godot', '*.uid', 'guest'))
+shutil.copytree(src, work, ignore=shutil.ignore_patterns('.git', '.godot', '*.uid', 'guest', '.lake', 'lean'))
 shutil.copytree(addon, work / 'addons/godot_sandbox', dirs_exist_ok=True)
 if overlay:
     shutil.copytree(overlay, work, dirs_exist_ok=True)

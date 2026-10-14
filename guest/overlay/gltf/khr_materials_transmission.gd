@@ -146,7 +146,9 @@ func _import_post_parse(state: GLTFState) -> Error:
 		var old: BaseMaterial3D = mats[i] as BaseMaterial3D
 		if old == null:
 			continue
-		var nm := _transmission_material(old, factor, _texture(state, tx.get("transmissionTexture", {})))
+		var nm := _transmission_material(
+			old, factor, _texture(state, tx.get("transmissionTexture", {}))
+		)
 		if exts.has(EXT_IOR):
 			nm.set_shader_parameter("ior", float((exts[EXT_IOR] as Dictionary).get("ior", 1.5)))
 		if exts.has(EXT_VOLUME):
@@ -186,7 +188,9 @@ func _apply_volume(state: GLTFState, m: ShaderMaterial, vol: Dictionary) -> void
 	# glTF attenuationColor is linear RGB: a plain vec3 uniform, no sRGB hint.
 	var ac: Array = vol.get("attenuationColor", [1.0, 1.0, 1.0])
 	if ac.size() >= 3:
-		m.set_shader_parameter("attenuation_color", Vector3(float(ac[0]), float(ac[1]), float(ac[2])))
+		m.set_shader_parameter(
+			"attenuation_color", Vector3(float(ac[0]), float(ac[1]), float(ac[2]))
+		)
 	# Absent means +infinity in glTF; 0 tells the shader "no absorption".
 	m.set_shader_parameter("attenuation_distance", float(vol.get("attenuationDistance", 0.0)))
 
@@ -213,7 +217,9 @@ func _shader(cull: String) -> Shader:
 	return _shaders[cull]
 
 
-func _transmission_material(old: BaseMaterial3D, factor: float, tx_tex: Texture2D) -> ShaderMaterial:
+func _transmission_material(
+	old: BaseMaterial3D, factor: float, tx_tex: Texture2D
+) -> ShaderMaterial:
 	var cull := "cull_back"
 	if old.cull_mode == BaseMaterial3D.CULL_DISABLED:
 		cull = "cull_disabled"

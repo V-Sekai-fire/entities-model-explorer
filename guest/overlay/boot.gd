@@ -14,6 +14,7 @@ var charts: Node3D
 var chart_cam: Camera3D
 var model_box := AABB(Vector3(-0.5, 0, -0.5), Vector3(1, 1, 1))
 
+
 func _ready() -> void:
 	# glTF files that require KHR_materials_transmission (glass) were refused by the importer.
 	GLTFDocument.register_gltf_document_extension(KhrTransmission.new())
@@ -66,22 +67,46 @@ func _ready() -> void:
 	hint.position.x = 320
 	var card: Control = ControlsCard.new()
 	layer.add_child(card)
-	card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
+	card.set_anchors_and_offsets_preset(
+		Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 16
+	)
 	root.gltf_is_loaded.connect(_on_loaded)
 	await get_tree().process_frame
 	await get_tree().process_frame
 	root.call("_load_file", SAMPLE)
 	print("BOOT built ", root.name, " sample=", SAMPLE)
 
+
 # X-Rite ColorChecker Classic, sRGB 8-bit (D65), row by row from dark skin to black.
 const CHECKER := [
-	[115, 82, 68], [194, 150, 130], [98, 122, 157], [87, 108, 67], [133, 128, 177], [103, 189, 170],
-	[214, 126, 44], [80, 91, 166], [193, 90, 99], [94, 60, 108], [157, 188, 64], [224, 163, 46],
-	[56, 61, 150], [70, 148, 73], [175, 54, 60], [231, 199, 31], [187, 86, 149], [8, 133, 161],
-	[243, 243, 242], [200, 200, 200], [160, 160, 160], [122, 122, 121], [85, 85, 85], [52, 52, 52],
+	[115, 82, 68],
+	[194, 150, 130],
+	[98, 122, 157],
+	[87, 108, 67],
+	[133, 128, 177],
+	[103, 189, 170],
+	[214, 126, 44],
+	[80, 91, 166],
+	[193, 90, 99],
+	[94, 60, 108],
+	[157, 188, 64],
+	[224, 163, 46],
+	[56, 61, 150],
+	[70, 148, 73],
+	[175, 54, 60],
+	[231, 199, 31],
+	[187, 86, 149],
+	[8, 133, 161],
+	[243, 243, 242],
+	[200, 200, 200],
+	[160, 160, 160],
+	[122, 122, 121],
+	[85, 85, 85],
+	[52, 52, 52],
 ]
 const CHART_W := 0.16
 const CHART_H := 0.107
+
 
 # Two charts on one board standing beside the model: the top one is lit like the model (it shows what the
 # lights and ambient do), the bottom one is unshaded (it shows only the output transform:
@@ -126,15 +151,21 @@ func _color_charts() -> Node3D:
 		holder.add_child(mi)
 	return holder
 
+
 func _print_chart_points() -> void:
 	for mi in charts.get_children():
 		var m := mi as MeshInstance3D
 		if m.name == "board":
 			continue
 		for i in CHECKER.size():
-			var local := Vector3((float(i % 6) + 0.5) / 6.0 * CHART_W - CHART_W * 0.5, CHART_H * 0.5 - (float(i / 6) + 0.5) / 4.0 * CHART_H, 0.0)
+			var local := Vector3(
+				(float(i % 6) + 0.5) / 6.0 * CHART_W - CHART_W * 0.5,
+				CHART_H * 0.5 - (float(i / 6) + 0.5) / 4.0 * CHART_H,
+				0.0
+			)
 			var sp := chart_cam.unproject_position(m.global_transform * local)
 			print("CHART %s %d %d %d" % [m.name, i, int(sp.x), int(sp.y)])
+
 
 func _measure_model() -> void:
 	var box := AABB()
@@ -151,6 +182,7 @@ func _measure_model() -> void:
 		model_box = box
 	_place_charts()
 
+
 # The charts are a physical board in the world: it lies flat on the floor to the model's right
 # (+X), face up, lit chart toward the back, and stays put when the camera orbits, like a real
 # ColorChecker laid down beside a subject in a photo.
@@ -160,15 +192,20 @@ func _place_charts() -> void:
 	var x := model_box.end.x + 0.08 * h + 0.6 * CHART_W * k
 	var y := model_box.position.y + 0.05 * CHART_W * k
 	var flat := Basis(Vector3.RIGHT, -PI / 2)
-	charts.transform = Transform3D(flat.scaled(Vector3(k, k, k)), Vector3(x, y, model_box.get_center().z))
+	charts.transform = Transform3D(
+		flat.scaled(Vector3(k, k, k)), Vector3(x, y, model_box.get_center().z)
+	)
+
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	if k and k.pressed and not k.echo and k.keycode == KEY_C:
 		charts.visible = not charts.visible
 
+
 var loads := 0
 var wire_on := false
+
 
 func _web_wireframe(on: bool) -> void:
 	wire_on = on
@@ -184,6 +221,7 @@ func _web_wireframe(on: bool) -> void:
 			mi.visible = not on
 			if on and mi.mesh:
 				_add_wire_copy(mi)
+
 
 func _edges_of(tri: PackedInt32Array) -> PackedInt32Array:
 	var edges := PackedInt32Array()
@@ -202,6 +240,7 @@ func _edges_of(tri: PackedInt32Array) -> PackedInt32Array:
 		edges[e + 5] = a
 		t += 3
 	return edges
+
 
 func _add_wire_copy(mi: MeshInstance3D) -> void:
 	var lines := ArrayMesh.new()
@@ -230,7 +269,13 @@ func _add_wire_copy(mi: MeshInstance3D) -> void:
 		arr[Mesh.ARRAY_WEIGHTS] = src[Mesh.ARRAY_WEIGHTS]
 		arr[Mesh.ARRAY_INDEX] = edges
 		var flags := 0
-		if src[Mesh.ARRAY_BONES] != null and (src[Mesh.ARRAY_WEIGHTS] as PackedFloat32Array).size() == (src[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() * 8:
+		if (
+			src[Mesh.ARRAY_BONES] != null
+			and (
+				(src[Mesh.ARRAY_WEIGHTS] as PackedFloat32Array).size()
+				== (src[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() * 8
+			)
+		):
 			flags = Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
 		lines.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arr, [], {}, flags)
 	if lines.get_surface_count() == 0:
@@ -247,6 +292,7 @@ func _add_wire_copy(mi: MeshInstance3D) -> void:
 	w.skeleton = mi.skeleton  # a sibling of mi, so mi's relative skeleton path holds
 	w.add_to_group("vsk_web_wire")
 	mi.get_parent().add_child.call_deferred(w)
+
 
 # The light background as geometry: a screen-filling quad at the far plane. Firefox's WebGPU does
 # not show the render pass clear colour (the background came out black), but it draws meshes.
@@ -276,6 +322,7 @@ void fragment() {
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mi
 
+
 func _on_loaded(ok: bool, _scene) -> void:
 	print("BOOT loaded ok=", ok)
 	if not ok:
@@ -291,6 +338,7 @@ func _on_loaded(ok: bool, _scene) -> void:
 		hint.text = "Drop another .glb, .gltf or .vrm to replace it."
 	if loads == 1 and "--warmup" in OS.get_cmdline_args():
 		_warmup()
+
 
 # Shader warm-up, run only by the export pipeline (page arg --warmup). Every material shader is
 # converted GLSL -> SPIR-V -> WGSL in the browser the first time it draws, which is most of a cold
@@ -313,7 +361,11 @@ func _warmup_materials() -> Array:
 		for scissor in [false, true]:
 			var u := StandardMaterial3D.new()
 			u.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			u.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR if scissor else BaseMaterial3D.TRANSPARENCY_DISABLED
+			u.transparency = (
+				BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+				if scissor
+				else BaseMaterial3D.TRANSPARENCY_DISABLED
+			)
 			u.cull_mode = BaseMaterial3D.CULL_DISABLED if cull_off else BaseMaterial3D.CULL_BACK
 			out.append(u)
 	var vc := StandardMaterial3D.new()
@@ -321,7 +373,10 @@ func _warmup_materials() -> Array:
 	out.append(vc)
 	return out
 
-func _std(rough_g: bool, normal: bool, ao: bool, emission: bool, scissor: bool, cull_off: bool) -> StandardMaterial3D:
+
+func _std(
+	rough_g: bool, normal: bool, ao: bool, emission: bool, scissor: bool, cull_off: bool
+) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	if rough_g:
 		m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
@@ -335,6 +390,7 @@ func _std(rough_g: bool, normal: bool, ao: bool, emission: bool, scissor: bool, 
 	if cull_off:
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return m
+
 
 func _warmup() -> void:
 	var mats := _warmup_materials()
@@ -353,6 +409,7 @@ func _warmup() -> void:
 	_dump_dir("user://shader_cache", "")
 	print("WARMUP done")
 
+
 func _dump_dir(path: String, rel: String) -> void:
 	var d := DirAccess.open(path)
 	if d == null:
@@ -364,4 +421,3 @@ func _dump_dir(path: String, rel: String) -> void:
 			print("SCF ", rel.path_join(f), " ", i, " ", n, " ", hex.substr(i * 8000, 8000))
 	for sub in d.get_directories():
 		_dump_dir(path.path_join(sub), rel.path_join(sub))
-

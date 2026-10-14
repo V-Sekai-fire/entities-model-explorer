@@ -980,4 +980,5 @@ func _import_post(gstate: GLTFState, node: Node) -> Error:
 			secondary_node.set_name("secondary")
 
 		_parse_secondary_node(secondary_node, vrm_extension, gstate, pose_diffs, is_vrm_0)
+	vrm_utils.refresh_global_poses(skeleton)
 	return OK

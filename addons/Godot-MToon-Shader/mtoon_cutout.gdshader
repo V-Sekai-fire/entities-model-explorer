@@ -89,6 +89,9 @@ const float PI_2 = 6.283185307180;
 const float EPS_COL = 0.00001;
 
 
+varying vec3 tspace0; // : TEXCOORD1;
+varying vec3 tspace1; // : TEXCOORD2;
+varying vec3 tspace2; // : TEXCOORD3;
 
 void vertex() {
 	UV=UV*_MainTex_ST.xy+_MainTex_ST.zw;
@@ -125,10 +128,12 @@ void vertex() {
 
 
 	// posWorld = (MODELVIEW_MATRIX*vec4(VERTEX.xyz, 1.0));
-	// The tangent frame rides Godot's own varyings: WebGPU has no locations left for more.
-	NORMAL = mat3(MODELVIEW_MATRIX)*NORMAL;
-	TANGENT = mat3(MODELVIEW_MATRIX)*TANGENT;
-	BINORMAL = mat3(MODELVIEW_MATRIX)*BINORMAL;
+	vec3 worldNormal = mat3(MODELVIEW_MATRIX)*NORMAL;
+	vec3 worldTangent = mat3(MODELVIEW_MATRIX)*TANGENT;
+	vec3 worldBitangent = mat3(MODELVIEW_MATRIX)*BINORMAL;
+	tspace0 = vec3(worldTangent.x, worldBitangent.x, worldNormal.x);
+	tspace1 = vec3(worldTangent.y, worldBitangent.y, worldNormal.y);
+	tspace2 = vec3(worldTangent.z, worldBitangent.z, worldNormal.z);
 }
 
 vec3 UnpackScaleNormal(vec4 normalmap, float scale) {
@@ -242,11 +247,13 @@ void fragment() {
 	//shade = min(shade, lit); ///// Mimic look of non-PBR min() clamp we commented out below.
 
 	// normal
-	// Godot flips NORMAL on back faces under cull_front and cull_disabled; undo it.
-	vec3 vertexNormal = FRONT_FACING ? NORMAL : -NORMAL;
-	viewNormal = vertexNormal;
+	viewNormal = vec3(0.0);
 	if (_NORMALMAP) {
-		viewNormal = mat3(TANGENT, BINORMAL, vertexNormal) * tangentNormal;
+		viewNormal.x = dot(tspace0, tangentNormal);
+		viewNormal.y = dot(tspace1, tangentNormal);
+		viewNormal.z = dot(tspace2, tangentNormal);
+	} else {
+		viewNormal = vec3(tspace0.z, tspace1.z, tspace2.z);
 	}
 	vec3 viewView = VIEW;
 	viewNormal *= step(0.0, dot(viewView, viewNormal)) * 2.0 - 1.0; // flip if projection matrix is flipped

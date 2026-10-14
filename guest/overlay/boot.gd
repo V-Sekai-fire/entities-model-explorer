@@ -12,6 +12,7 @@ var hint: Label
 var cam_rig: Node3D
 var charts: Node3D
 var chart_cam: Camera3D
+var key_light: DirectionalLight3D
 var model_box := AABB(Vector3(-0.5, 0, -0.5), Vector3(1, 1, 1))
 
 
@@ -38,7 +39,8 @@ func _ready() -> void:
 	we.camera_attributes = null
 	var cam: Camera3D = root.get_node("CamController/CamRotHelper/Camera3D")
 	cam.attributes = null
-	(cam.get_node("DirectionalLight3D") as DirectionalLight3D).light_energy = 0.73
+	key_light = cam.get_node("DirectionalLight3D")
+	key_light.light_energy = 0.73
 	root.add_child(_backdrop())
 	charts = _color_charts()
 	root.add_child(charts)
@@ -183,17 +185,35 @@ func _measure_model() -> void:
 	_place_charts()
 
 
-# The charts are a physical board in the world: it lies flat on the floor to the model's right
-# (+X), face up, lit chart toward the back, and stays put when the camera orbits, like a real
-# ColorChecker laid down beside a subject in a photo.
+# The charts are a physical board in the world, standing on the floor to the model's right (+X)
+# and staying put when the camera orbits, like a real ColorChecker propped up beside a subject in
+# a photo. Laid flat, the camera saw the patches edge-on (about 12 degrees) and the key light hit
+# them at a slant, so the board is tilted: its face points halfway between the camera and the key
+# light (the light rides on the camera), which gives every patch the same light and a full view.
 func _place_charts() -> void:
 	var h := maxf(model_box.size.y, 0.001)
 	var k := 0.5 * h / (2.2 * CHART_H)
-	var x := model_box.end.x + 0.08 * h + 0.6 * CHART_W * k
-	var y := model_box.position.y + 0.05 * CHART_W * k
-	var flat := Basis(Vector3.RIGHT, -PI / 2)
-	charts.transform = Transform3D(
-		flat.scaled(Vector3(k, k, k)), Vector3(x, y, model_box.get_center().z)
+	var floor_y := model_box.position.y
+	var at := Vector3(
+		model_box.end.x + 0.08 * h + 0.6 * CHART_W * k,
+		floor_y + 1.12 * CHART_H * k,
+		model_box.get_center().z
+	)
+	var to_cam := (chart_cam.global_position - at).normalized()
+	var to_light := key_light.global_basis.z.normalized()
+	var face := (to_cam + to_light).normalized()
+	var b := Basis.looking_at(-face, Vector3.UP).scaled(Vector3(k, k, k))
+	# Stand the board's lowest corner on the floor.
+	var half := Vector3(CHART_W * 0.56, CHART_H * 1.12, CHART_W * 0.02)
+	var low := (b * Vector3(0, 0, -CHART_W * 0.021)).y
+	low -= absf(b.x.y) * half.x + absf(b.y.y) * half.y + absf(b.z.y) * half.z
+	at.y = floor_y - low
+	charts.transform = Transform3D(b, at)
+	print(
+		(
+			"CHART face %.3f %.3f %.3f cam %.3f light %.3f"
+			% [face.x, face.y, face.z, face.dot(to_cam), face.dot(to_light)]
+		)
 	)
 
 
@@ -329,11 +349,12 @@ func _on_loaded(ok: bool, _scene) -> void:
 		hint.text = "That file could not be opened. Try a .glb, .gltf or .vrm."
 		return
 	loads += 1
-	_measure_model.call_deferred()
-	get_tree().create_timer(1.0).timeout.connect(_print_chart_points)
 	# The camera starts level with the floor grid, which then shows edge-on as nothing; look down a
 	# little so the grid is visible. Deferred: CamController resets the pitch on the same signal.
 	cam_rig.set_deferred("rotation", Vector3(deg_to_rad(-12.0), 0.0, 0.0))
+	# After the pitch (deferred calls run in order): the board faces the camera's start position.
+	_measure_model.call_deferred()
+	get_tree().create_timer(1.0).timeout.connect(_print_chart_points)
 	if loads > 1:
 		hint.text = "Drop another .glb, .gltf or .vrm to replace it."
 	if loads == 1 and "--warmup" in OS.get_cmdline_args():

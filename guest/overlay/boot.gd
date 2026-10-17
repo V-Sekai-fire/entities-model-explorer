@@ -3,7 +3,6 @@ extends Node
 # makes the first visit friendly: a light studio background instead of the procedural sky (which
 # some browsers cannot draw: they show black), a sample model already loaded, and a one-line hint.
 const ModelExplorerScene = preload("res://vsk_model_explorer/scene/ModelExplorer_scene.gd")
-const ControlsCard = preload("res://controls_card.gd")
 const KhrTransmission = preload("res://gltf/khr_materials_transmission.gd")
 const SAMPLE := "res://sample/mire.glb"
 const PAPER := Color(0.93, 0.93, 0.92)
@@ -67,11 +66,8 @@ func _ready() -> void:
 	# Bottom left, clear of the information panel (300 px) and of the controls card on the right.
 	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, 20)
 	hint.position.x = 320
-	var card: Control = ControlsCard.new()
-	layer.add_child(card)
-	card.set_anchors_and_offsets_preset(
-		Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 16
-	)
+	# The app draws the controls card; the colour chart is this build's own control.
+	root.call("add_control_row", ["keys", ["C"], "C", "Colour chart"])
 	root.gltf_is_loaded.connect(_on_loaded)
 	await get_tree().process_frame
 	await get_tree().process_frame

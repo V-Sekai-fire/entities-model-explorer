@@ -9,16 +9,20 @@ const Worker = preload("res://vsk_model_explorer/core/Worker.gd")
 var worker: Worker
 
 const gltf_vrm_extension_const = preload("res://addons/vrm/vrm_extension.gd")
+const ControlsCard = preload("res://vsk_model_explorer/core/ControlsCard.gd")
 
 var gltf_doc = GLTFDocument.new()
 var gltf_vrm_extension = gltf_vrm_extension_const.new()
 
 var fbx_doc: Object = null
+var controls_card: Control
 
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
 	get_viewport().files_dropped.connect(_on_file_dropped)
+	# The controls card, bottom right on top of the 3D view; H shows or hides it.
+	_ensure_controls_card()
 	if ClassDB.get_class_list().find("FBXDocument") != -1:
 		fbx_doc = ClassDB.instantiate("FBXDocument")
 
@@ -176,3 +180,20 @@ func _emit_gltf_load_failed() -> void:
 
 func _exit_tree():
 	GLTFDocument.unregister_gltf_document_extension(gltf_vrm_extension)
+
+
+# A row on the controls card for a control that one build adds, such as the web viewer's chart.
+# Callable before _ready: a build may add its row before this node enters the tree.
+func add_control_row(row: Array) -> void:
+	_ensure_controls_card()
+	controls_card.add_row(row)
+
+
+func _ensure_controls_card() -> void:
+	if controls_card:
+		return
+	var layer := CanvasLayer.new()
+	layer.layer = 10
+	add_child(layer)
+	controls_card = ControlsCard.new()
+	layer.add_child(controls_card)

@@ -2,6 +2,8 @@ extends Control
 # A card that shows the viewer's controls as pictures: a mouse with the button that does the
 # action lit, key caps for the keys, a file for drop. The rows are the controls CamController.gd
 # and UIController.gd actually read; keep them in step. H shows or hides the card.
+# ModelExplorer.gd adds the card to every build; a build that adds a control of its own appends a
+# row with add_row().
 
 const INK := Color(0.13, 0.13, 0.13)
 const MUTE := Color(0.46, 0.46, 0.46)
@@ -11,6 +13,7 @@ const CARD := Color(0.985, 0.985, 0.98, 0.94)
 const ROW := 34.0
 const PAD := 14.0
 const ICON_W := 40.0
+const MARGIN := 16.0
 
 # kind: "mouse" (part = left / right / middle / wheel), "keys" (part = key names), "file".
 const ROWS := [
@@ -22,18 +25,39 @@ const ROWS := [
 	["keys", ["E"], "E", "Explode meshes"],
 	["keys", ["G"], "G", "Hide grid"],
 	["keys", ["Esc"], "Esc", "Close a popup"],
-	["keys", ["C"], "C", "Colour chart"],
 	["file", "", "Drop a file", ".glb .gltf .vrm"],
 ]
 
 var font: Font
+var rows: Array = []
+
+
+func _init() -> void:
+	for r in ROWS:
+		rows.append(r)
+
+
+# Insert a row above the file-drop row, which stays last.
+func add_row(row: Array) -> void:
+	rows.insert(rows.size() - 1, row)
+	_fit()
+	queue_redraw()
+
+
+# Pinned to the bottom-right corner, MARGIN px in; the offsets follow the height as rows change.
+func _fit() -> void:
+	custom_minimum_size = Vector2(300, PAD * 2 + 22 + ROW * rows.size() + 18)
+	set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	offset_right = -MARGIN
+	offset_bottom = -MARGIN
+	offset_left = -MARGIN - custom_minimum_size.x
+	offset_top = -MARGIN - custom_minimum_size.y
 
 
 func _ready() -> void:
 	font = ThemeDB.fallback_font
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	custom_minimum_size = Vector2(300, PAD * 2 + 22 + ROW * ROWS.size() + 18)
-	size = custom_minimum_size
+	_fit()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -51,7 +75,7 @@ func _draw() -> void:
 	draw_style_box(box, Rect2(Vector2.ZERO, size))
 	draw_string(font, Vector2(PAD, PAD + 13), "CONTROLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, MUTE)
 	var y := PAD + 22.0
-	for r in ROWS:
+	for r in rows:
 		var c := Vector2(PAD + ICON_W * 0.5, y + ROW * 0.5)
 		match r[0]:
 			"mouse":

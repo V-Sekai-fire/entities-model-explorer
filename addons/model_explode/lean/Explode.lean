@@ -2,8 +2,8 @@
 Explode layout: proof that exploded pieces never intersect.
 
 Each piece is an axis-aligned box (centre `c`, half extents `h`) in world space with a direction
-`v` (the viewer picks it: along a limb, or out from the model centre). Pieces are placed one at
-a time in an order the viewer picks (root parts first, then nearest the centre); each moves along
+`v` (out from the model centre). Pieces are placed one at
+a time in an order the viewer picks (nearest the centre first); each moves along
 its own direction by the smallest candidate amount `t ≥ 0` at which its box is at
 least `gap` away, on some axis, from every box placed before it. Placed boxes never move again. The proof holds for any pieces, directions and order.
 

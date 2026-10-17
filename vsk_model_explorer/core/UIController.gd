@@ -519,7 +519,7 @@ func _show_texture_viewer(tex):
 	add_child.call_deferred(texViewer)
 
 
-# addons/model_explode: the model comes apart at its joints, parts moved so that no two intersect.
+# addons/model_explode: the model comes apart into its separate shells, moved so none intersect.
 func _set_exploded(on: bool) -> void:
 	exploded = on
 	if on:

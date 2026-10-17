@@ -1,7 +1,8 @@
 extends Control
 # A card that shows the viewer's controls as pictures: a mouse with the button that does the
 # action lit, key caps for the keys, a file for drop. The rows are the controls CamController.gd
-# and UIController.gd actually read; keep them in step. H shows or hides the card.
+# and UIController.gd actually read; keep them in step. The card starts hidden so it does not
+# cover the panels in a small window; H shows or hides it.
 # ModelExplorer.gd adds the card to every build; a build that adds a control of its own appends a
 # row with add_row().
 
@@ -57,6 +58,7 @@ func _fit() -> void:
 func _ready() -> void:
 	font = ThemeDB.fallback_font
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visible = false
 	_fit()
 
 

@@ -6,7 +6,6 @@
 [ext_resource type="Script" uid="uid://2xw6ahdkwk3r" path="res://vsk_model_explorer/core/UIController.gd" id="4_3e4pv"]
 [ext_resource type="Texture2D" uid="uid://dngs678q2vwu2" path="res://vsk_model_explorer/texture/T_ProgressCircle_BG.png" id="5_ki67k"]
 [ext_resource type="Texture2D" uid="uid://ciy2pu22x0j1w" path="res://vsk_model_explorer/texture/T_ProgressCircle_FG.png" id="6_18sj1"]
-[ext_resource type="Theme" uid="uid://3n58c5iseefm" path="res://vsk_model_explorer/resource/Theme.theme" id="6_ee8my"]
 [ext_resource type="Script" uid="uid://gv60fo01hmj2" path="res://vsk_model_explorer/core/ProgressIndicator.gd" id="7_mw4jw"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_je8ca"]
@@ -71,9 +70,11 @@ script = ExtResource("4_3e4pv")
 visible = false
 anchors_preset = 9
 anchor_bottom = 1.0
-offset_right = 300.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 316.0
+offset_bottom = -16.0
 grow_vertical = 2
-theme = ExtResource("6_ee8my")
 
 [node name="MarginContainer" type="MarginContainer" parent="Node/InfoPanel" unique_id=961399275]
 layout_mode = 2

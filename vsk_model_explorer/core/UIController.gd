@@ -28,12 +28,41 @@ var meshViewer
 
 const DYNAMIC_CONTROL_GROUP = "dynamic control"
 
+const CardStyle = preload("res://vsk_model_explorer/core/CardStyle.gd")
+
+var card_theme: Theme = CardStyle.make_theme()
+
 var maxAabb: AABB
 var exploder = preload("res://addons/model_explode/explode.gd").new()
 
 
 func _ready():
 	GlobalSignal.trigger_texture_viewer.connect(_show_texture_viewer)
+	# Every control surface takes the controls card's look. The panels hang off this plain Node, and
+	# Godot passes a theme down only through Controls, so each top-level panel gets it here.
+	for panel in [InfoPanel, LoadingPanel, MsgPanel]:
+		panel.theme = card_theme
+	CardStyle.heading($InfoPanel/MarginContainer/Row/Label)
+	MsgLabel.add_theme_font_size_override("font_size", 20)
+
+
+# A popup (mesh, material, texture) gets a card heading and an Esc key cap to close it, the key the
+# controls card names for that.
+func _card_popup(p: Control) -> Control:
+	p.theme = card_theme
+	var head := p.find_child("HBoxContainer", true, false)
+	for c in head.find_children("*", "Label", true, false):
+		CardStyle.heading(c)
+	for b in head.find_children("*", "Button", true, false):
+		b.text = "Esc"
+		b.custom_minimum_size = Vector2.ZERO
+	return p
+
+
+# A list heading in the information panel: upper case and to the left, like the card's CONTROLS.
+func _card_list(tree: Tree, title: String) -> void:
+	tree.set_column_title(0, title.to_upper())
+	tree.set_column_title_alignment(0, HORIZONTAL_ALIGNMENT_LEFT)
 
 
 func _process(_delta):
@@ -149,7 +178,7 @@ func _on_root_gltf_is_loaded(success, gltf: Node):
 
 		meshInfoTree.gui_input.connect(_on_scroll_input.bind(meshInfoTree))
 
-		meshInfoTree.set_column_title(0, "Mesh (%d)" % meshes.size())
+		_card_list(meshInfoTree, "Mesh (%d)" % meshes.size())
 
 		var meshParent: TreeItem = meshInfoTree.create_item()
 
@@ -241,7 +270,7 @@ func _on_root_gltf_is_loaded(success, gltf: Node):
 
 			materialInfoTree.gui_input.connect(_on_scroll_input.bind(materialInfoTree))
 
-			materialInfoTree.set_column_title(0, "Material (%d)" % material_array.size())
+			_card_list(materialInfoTree, "Material (%d)" % material_array.size())
 
 			var matParent: TreeItem = materialInfoTree.create_item()
 
@@ -302,7 +331,7 @@ func _on_root_gltf_is_loaded(success, gltf: Node):
 
 			textureInfoTree.gui_input.connect(_on_scroll_input.bind(textureInfoTree))
 
-			textureInfoTree.set_column_title(0, "Texture (%d)" % texture_array.size())
+			_card_list(textureInfoTree, "Texture (%d)" % texture_array.size())
 
 			var texParent = textureInfoTree.create_item()
 
@@ -376,7 +405,7 @@ func _on_root_gltf_is_loaded(success, gltf: Node):
 
 			animationTree.gui_input.connect(_on_scroll_input.bind(animationTree))
 
-			animationTree.set_column_title(0, "Animation (%d)" % animationArray.size())
+			_card_list(animationTree, "Animation (%d)" % animationArray.size())
 			animationTree.select_mode = Tree.SELECT_ROW
 
 			var animRoot = animationTree.create_item()
@@ -451,7 +480,7 @@ func _on_material_item_double_clicked(tree: Tree):
 		if matViewer != null:
 			matViewer.queue_free()
 
-		matViewer = MaterialViewer.instantiate()
+		matViewer = _card_popup(MaterialViewer.instantiate())
 		matViewer.set_material_view(mat)
 		add_child.call_deferred(matViewer)
 
@@ -514,7 +543,7 @@ func _show_texture_viewer(tex):
 	if texViewer and not texViewer.is_queued_for_deletion():
 		texViewer.queue_free()
 
-	texViewer = TextureViewer.instantiate()
+	texViewer = _card_popup(TextureViewer.instantiate())
 	texViewer.set_draw_data(tex)
 	add_child.call_deferred(texViewer)
 
@@ -549,7 +578,7 @@ func _on_mesh_clicked(
 		if meshViewer != null and not meshViewer.is_queued_for_deletion():
 			meshViewer.queue_free()
 
-		meshViewer = MeshInfoViewer.instantiate()
+		meshViewer = _card_popup(MeshInfoViewer.instantiate())
 		meshViewer.set_mesh(mesh)
 
 		var pos = event.position + Vector2(60, -100)

@@ -1,20 +1,20 @@
 extends Control
 # A card that shows the viewer's controls as pictures: a mouse with the button that does the
 # action lit, key caps for the keys, a file for drop. The rows are the controls CamController.gd
-# and UIController.gd actually read; keep them in step. The card starts hidden so it does not
-# cover the panels in a small window; H shows or hides it.
+# and UIController.gd actually read; keep them in step. The card shows when the viewer starts;
+# H hides it and shows it again. Its colours and sizes come from CardStyle.gd, which every other
+# control surface uses too.
 # ModelExplorer.gd adds the card to every build; a build that adds a control of its own appends a
 # row with add_row().
 
-const INK := Color(0.13, 0.13, 0.13)
-const MUTE := Color(0.46, 0.46, 0.46)
-const LINE := Color(0.78, 0.78, 0.76)
-const LIT := Color(0.16, 0.47, 0.85)
-const CARD := Color(0.985, 0.985, 0.98, 0.94)
+const CardStyle = preload("res://vsk_model_explorer/core/CardStyle.gd")
+const INK := CardStyle.INK
+const MUTE := CardStyle.MUTE
+const LIT := CardStyle.LIT
 const ROW := 34.0
-const PAD := 14.0
+const PAD := CardStyle.PAD
 const ICON_W := 40.0
-const MARGIN := 16.0
+const MARGIN := CardStyle.MARGIN
 
 # kind: "mouse" (part = left / right / middle / wheel), "keys" (part = key names), "file".
 const ROWS := [
@@ -58,7 +58,6 @@ func _fit() -> void:
 func _ready() -> void:
 	font = ThemeDB.fallback_font
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	visible = false
 	_fit()
 
 
@@ -69,12 +68,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 
 func _draw() -> void:
-	var box := StyleBoxFlat.new()
-	box.bg_color = CARD
-	box.border_color = LINE
-	box.set_border_width_all(1)
-	box.set_corner_radius_all(8)
-	draw_style_box(box, Rect2(Vector2.ZERO, size))
+	draw_style_box(CardStyle.card_box(), Rect2(Vector2.ZERO, size))
 	draw_string(font, Vector2(PAD, PAD + 13), "CONTROLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, MUTE)
 	var y := PAD + 22.0
 	for r in rows:

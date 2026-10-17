@@ -677,3 +677,4 @@ func _import_post(gstate, root):
 				)
 
 	# FIXME: due to head duplication, do we now have some meshes which are not in gltf state?
+	return OK

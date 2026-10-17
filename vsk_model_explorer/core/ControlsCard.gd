@@ -23,7 +23,7 @@ const ROWS := [
 	["mouse", "wheel", "Scroll", "Zoom"],
 	["mouse", "left", "Click a mesh", "Mesh details"],
 	["keys", ["W"], "W", "Wireframe"],
-	["keys", ["E"], "E", "Explode meshes"],
+	["keys", ["E"], "E", "Explode"],
 	["keys", ["G"], "G", "Hide grid"],
 	["keys", ["Esc"], "Esc", "Close a popup"],
 	["file", "", "Drop a file", ".glb .gltf .vrm"],

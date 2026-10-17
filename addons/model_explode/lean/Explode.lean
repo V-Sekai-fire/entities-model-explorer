@@ -2,9 +2,10 @@
 Explode layout: proof that exploded pieces never intersect.
 
 Each piece is an axis-aligned box (centre `c`, half extents `h`) in world space with a direction
-`v` (out from the model centre). Pieces are placed one at a time, nearest the centre first; each
-moves along its own direction by the smallest candidate amount `t ≥ 0` at which its box is at
-least `gap` away, on some axis, from every box placed before it. Placed boxes never move again.
+`v` (out from the model centre). Pieces are placed one at
+a time in an order the viewer picks (nearest the centre first); each moves along
+its own direction by the smallest candidate amount `t ≥ 0` at which its box is at
+least `gap` away, on some axis, from every box placed before it. Placed boxes never move again. The proof holds for any pieces, directions and order.
 
 `layout_sound` proves that every two boxes of a layout are separated (`Separated`), and
 `separated_disjoint` that separated boxes share no point; each mesh lies inside its box, so no two
@@ -62,7 +63,7 @@ def layoutFrom (gap : ℚ) : List Box → List Piece → Option (List Box)
     | some t => layoutFrom gap (acc ++ [moved p t]) ps
     | none => none
 
-/-- Place `ps` in order (the caller sorts them nearest the centre first). -/
+/-- Place `ps` in order (the caller picks the order). -/
 def layout (gap : ℚ) (ps : List Piece) : Option (List Box) := layoutFrom gap [] ps
 
 lemma place_free {gap : ℚ} {placed : List Box} {p : Piece} {t : ℚ}

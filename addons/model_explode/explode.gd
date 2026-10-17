@@ -13,9 +13,13 @@ extends RefCounted
 # Joint cuts, only where the artist made no edges: a skinned shell with at least CUT_SHARE of the
 # triangles (a body modelled in one piece) is cut at its skeleton's big branches (legs, arms,
 # neck, waist: a branch holding at least BRANCH_SHARE of that shell), like an action figure. Each
-# cut is a flat plane across the limb at the joint, square to the limb; two sibling parts meet on
-# the plane halfway between their joints. Triangles crossing a plane are split exactly on it, so
-# the cut edge is straight, and each opening is closed with a flat cap. No bone names are read.
+# cut is a flat plane across the limb at the joint, square to the limb. No bone names are read.
+# Cap, then cut: the shell is first made a closed solid (welded by position, duplicate triangles
+# and triangles on an edge three or more share dropped, every hole filled), then Manifold (Godot
+# CSG) cuts it with one capping box per part: the box starts at the joint plane and holds that
+# part, deepest parts first, each part minus the boxes cut before it. Manifold makes the cut
+# faces, so every opening is closed exactly and the original triangles and UVs stay; a cut face
+# takes the base colour of the material around its joint. A shell Manifold refuses stays whole.
 #
 # Layout: piece i has a world-space box (centre c_i, half extents h_i) and a direction v_i out
 # from the model centre. Pieces are placed nearest the centre first, larger first on ties; each
@@ -36,7 +40,8 @@ const MIN_SHARE := 0.01  # a shell with at least this share of the triangles is 
 const WELD := 1e-5  # vertices closer than this share of the model size are one vertex
 const CUT_SHARE := 0.5  # a skinned shell with at least this share of the triangles gets joint cuts
 const BRANCH_SHARE := 0.04  # a skeleton branch with at least this share of that shell is a part
-const CAP_COLOR := Color(0.62, 0.6, 0.58)
+const CAP_COLOR := Color(0.62, 0.6, 0.58)  # cut colour where a material has no base colour
+const BOX_PAD := 0.08  # capping boxes reach this share of their part's size past it
 # Placement works with a gap slightly above GAP: candidates aim at AIM x gap, a spot counts as
 # free at KEEP x gap; float32 rounding (about 1e-7 of the model size) stays far below the margin.
 const AIM := 1.002
@@ -59,6 +64,7 @@ var part_box: Array = []  # world AABB per piece
 var part_depth: Array = []  # joint cuts above the piece (0 for whole shells)
 var part_axis: Array = []  # world direction of a cut part's limb (Vector3), or null
 var part_joint: Array = []  # world position of a cut part's joint (Vector3), or null
+var base_of := {}  # Material -> [base colour image or null, base colour], for cap colours
 
 
 # Builds the pieces and moves them out. `models` are the loaded model roots; `parent` receives the
@@ -127,6 +133,7 @@ func implode() -> void:
 	part_depth.clear()
 	part_axis.clear()
 	part_joint.clear()
+	base_of.clear()
 
 
 func is_exploded() -> bool:
@@ -281,21 +288,10 @@ func _split_shells(surfs: Array) -> void:
 			if float(size_of[r]) >= CUT_SHARE * float(total) and not cut_root.has(r):
 				cut_root[r] = e[6]
 	var rigs := _rigs(surfs, tris, shell_tris, cut_root)
-	var caps := {}  # cut pair -> [part, part, plane normal toward the second, cut edges, rig]
-	# Emit: each surface split by piece key.
+	var cut_src := {}  # shell root -> [[arrays, material, world xform], ...]
+	# Emit: each surface split by piece key; triangles of a cut shell are kept for the cut.
 	for si in surfs.size():
 		var e: Array = surfs[si]
-		var cuts_here := false
-		if e[6] != null and rigs.has(e[6]):
-			for r in shell_tris[si] as PackedInt32Array:
-				if cut_root.has(r):
-					cuts_here = true
-					break
-		if cuts_here:
-			_emit_cut(
-				e, vid[si], tris[si], shell_tris[si], cut_root, rigs[e[6]], size_of, big, caps
-			)
-			continue
 		if tris[si].is_empty():
 			_add(_part("mesh:%d" % e[5]), e[1], e[0], e[2], e[3], e[4])
 			continue
@@ -304,6 +300,8 @@ func _split_shells(surfs: Array) -> void:
 		var tri_group := PackedInt32Array()
 		for r in shell_tris[si] as PackedInt32Array:
 			var k := "shell:%d" % r if float(size_of[r]) >= big else "small:%d" % e[5]
+			if cut_root.has(r) and rigs.has(cut_root[r]):
+				k = "cut:%d" % r
 			if not local.has(k):
 				local[k] = keys.size()
 				keys.append(k)
@@ -314,8 +312,14 @@ func _split_shells(surfs: Array) -> void:
 				e[0], _blocks(e[0][Mesh.ARRAY_VERTEX]), tris[si], tri_group, keys.size()
 			)
 		for g in parts.size():
-			_add(_part(keys[g]), e[1], parts[g], e[2], e[3], "%s_%d" % [e[4], g])
-	_emit_caps(caps, rigs)
+			var k: String = keys[g]
+			if k.begins_with("cut:"):
+				var r := int(k.trim_prefix("cut:"))
+				cut_src[r] = (cut_src.get(r, []) as Array) + [[parts[g], e[2], e[3]]]
+				continue
+			_add(_part(k), e[1], parts[g], e[2], e[3], "%s_%d" % [e[4], g])
+	for r in cut_src:
+		_cap_and_cut(cut_src[r], rigs[cut_root[r]], "shell:%d" % r)
 
 
 # --- Joint cuts -----------------------------------------------------------------------------
@@ -477,16 +481,16 @@ func _rigs(surfs: Array, tris: Array, shell_tris: Array, cut_root: Dictionary) -
 				a = j0 - _bone_world(skel, skel.get_bone_parent(c))
 			if a.length() <= 1e-9:
 				continue
-			# Move the joint down the chain past bones that are short or hold little of the part's
-			# skin (a clavicle, a shoulder bone rooted on the spine), at most two.
+			# Move the joint one bone down the chain when the first bone is short or holds almost
+			# none of the part's skin (a clavicle, a shoulder bone rooted inside the chest).
 			var j := j0
 			var at := 0
 			var full := a.length()
-			while at < 2 and at + 2 < chain.size():
+			while at < 1 and at + 2 < chain.size():
 				var bone_len := (
 					(_bone_world(skel, chain[at + 1]) - _bone_world(skel, chain[at])).length()
 				)
-				if bone_len >= 0.25 * full and float(m[chain[at]]) >= 0.15 * float(sub[c]):
+				if bone_len >= 0.25 * full and float(m[chain[at]]) >= 0.05 * float(sub[c]):
 					break
 				at += 1
 			if at > 0:
@@ -570,22 +574,6 @@ func _label(x: Vector3, rig: Dictionary) -> int:
 	return part
 
 
-# The plane between parts a and b, as [point, normal toward b], or [] when there is none: a
-# joint plane between a part and its child, else the plane halfway between two joints.
-func _plane(a: int, b: int, rig: Dictionary) -> Array:
-	var axis: Dictionary = rig["axis"]
-	var joint: Dictionary = rig["joint"]
-	if rig["up"].get(b, -1) == a and axis.has(b):
-		return [joint[b], axis[b]]
-	if rig["up"].get(a, -1) == b and axis.has(a):
-		return [joint[a], -(axis[a] as Vector3)]
-	if joint.has(a) and joint.has(b):
-		var ab: Vector3 = (joint[b] as Vector3) - (joint[a] as Vector3)
-		if ab.length() > 1e-9:
-			return [((joint[a] as Vector3) + (joint[b] as Vector3)) * 0.5, ab.normalized()]
-	return []
-
-
 func _cut_key(rig: Dictionary, part: int) -> String:
 	return "cut:%d:%d" % [rig["id"], part]
 
@@ -599,426 +587,351 @@ func _cut_part(rig: Dictionary, part: int) -> int:
 	)
 
 
-# One surface with joint cuts: triangles of a cut shell are labelled by part and split exactly on
-# the plane between two parts; other triangles go to their shell's piece. Cut edges are recorded
-# in `caps` for _emit_caps.
-func _emit_cut(
-	e: Array,
-	vb: Array,
-	tb: Array,
-	roots: PackedInt32Array,
-	cut_root: Dictionary,
-	rig: Dictionary,
-	size_of: Dictionary,
-	big: float,
-	caps: Dictionary
-) -> void:
-	var arrays: Array = e[0]
-	var xf: Transform3D = e[3]
-	var pos_b := _blocks(arrays[Mesh.ARRAY_VERTEX])
-	var nrm_b := _blocks(arrays[Mesh.ARRAY_NORMAL]) if arrays[Mesh.ARRAY_NORMAL] != null else []
-	var tan_b := _blocks(arrays[Mesh.ARRAY_TANGENT]) if arrays[Mesh.ARRAY_TANGENT] != null else []
-	var col_b := _blocks(arrays[Mesh.ARRAY_COLOR]) if arrays[Mesh.ARRAY_COLOR] != null else []
-	var uv_b := _blocks(arrays[Mesh.ARRAY_TEX_UV]) if arrays[Mesh.ARRAY_TEX_UV] != null else []
-	var uv2_b := _blocks(arrays[Mesh.ARRAY_TEX_UV2]) if arrays[Mesh.ARRAY_TEX_UV2] != null else []
-	# Output arrays: the old vertices, then the new ones made on cut edges.
-	var pos := PackedVector3Array()
-	var nrm := PackedVector3Array()
-	var tan := PackedFloat32Array()
-	var col := PackedColorArray()
-	var uv := PackedVector2Array()
-	var uv2 := PackedVector2Array()
-	for blk in pos_b:
-		pos.append_array(blk)
-	for blk in nrm_b:
-		nrm.append_array(blk)
-	for blk in tan_b:
-		tan.append_array(blk)
-	for blk in col_b:
-		col.append_array(blk)
-	for blk in uv_b:
-		uv.append_array(blk)
-	for blk in uv2_b:
-		uv2.append_array(blk)
-	var label := {}  # vertex -> part
-	var made := {}  # "a b pair" -> new vertex index
-	var idx := PackedInt32Array()
-	var keys: Array = []
-	var local := {}
-	var tri_group := PackedInt32Array()
-	var ti := 0
-	for blk in tb:
-		var ib := blk as PackedInt32Array
-		var t := 0
-		while t + 2 < ib.size():
-			var r: int = roots[ti]
-			ti += 1
-			var tri := [ib[t], ib[t + 1], ib[t + 2]]
-			t += 3
-			if not cut_root.has(r):
-				var k := "shell:%d" % r if float(size_of[r]) >= big else "small:%d" % e[5]
-				_tri_out(tri, k, idx, keys, local, tri_group)
-				continue
-			var lab: Array = []
-			for v in tri:
-				if not label.has(v):
-					label[v] = _label(xf * (pos_b[v / BLOCK] as PackedVector3Array)[v % BLOCK], rig)
-				lab.append(label[v])
-			if lab[0] == lab[1] and lab[1] == lab[2]:
-				_tri_out(tri, _cut_key(rig, lab[0]), idx, keys, local, tri_group)
-				_cut_part(rig, lab[0])
-				continue
-			# Marching triangles over the part labels: every edge whose ends differ is cut once,
-			# where it crosses the plane between the two parts, so neighbouring triangles agree
-			# and the cut edges chain into closed loops.
-			var m := []  # cut vertex on edge i (corner i to corner i+1), or -1
-			var wk := []  # its weld key
-			for i in 3:
-				var u: int = tri[i]
-				var w: int = tri[(i + 1) % 3]
-				if lab[i] == lab[(i + 1) % 3]:
-					m.append(-1)
-					wk.append("")
+# Cap, then cut, one shell. `src` holds [surface arrays, material, world xform] per surface.
+func _cap_and_cut(src: Array, rig: Dictionary, whole_key: String) -> void:
+	# World positions and UVs, one list over all surfaces; triangles per surface.
+	var pos: Array = []
+	var uv: Array = []
+	var mat_of: Array = []  # per vertex: its surface
+	var tris: Array = []  # per surface: PackedInt32Array into pos
+	for si in src.size():
+		var arrays: Array = src[si][0]
+		var xf: Transform3D = src[si][2]
+		var base := pos.size()
+		var has_uv: bool = arrays[Mesh.ARRAY_TEX_UV] != null
+		for blk in _blocks(arrays[Mesh.ARRAY_VERTEX]):
+			for p in blk as PackedVector3Array:
+				pos.append(xf * p)
+				mat_of.append(si)
+		if has_uv:
+			for blk in _blocks(arrays[Mesh.ARRAY_TEX_UV]):
+				for t in blk as PackedVector2Array:
+					uv.append(t)
+		else:
+			for i in pos.size() - base:
+				uv.append(Vector2.ZERO)
+		var ix := PackedInt32Array()
+		for blk in _blocks(_indices(arrays)):
+			for v in blk as PackedInt32Array:
+				ix.append(base + v)
+		tris.append(ix)
+	var lo := Vector3(INF, INF, INF)
+	var hi := -lo
+	for p in pos:
+		lo = lo.min(p)
+		hi = hi.max(p)
+	var size := (hi - lo).length()
+	var q := maxf(size * WELD, 1e-9)
+	var weld := {}
+	var w: Array = []
+	for p in pos:
+		var key := Vector3i(roundi(p.x / q), roundi(p.y / q), roundi(p.z / q))
+		if not weld.has(key):
+			weld[key] = weld.size()
+		w.append(weld[key])
+	# Repair: drop degenerate and duplicate triangles, then triangles on an edge three or more
+	# triangles share, until every edge has one or two.
+	var keep: Array = []  # [surface, a, b, c]
+	var seen := {}
+	for si in tris.size():
+		for blk in _blocks(tris[si]):
+			var ib := blk as PackedInt32Array
+			var t := 0
+			while t + 2 < ib.size():
+				var a: int = ib[t]
+				var b: int = ib[t + 1]
+				var c: int = ib[t + 2]
+				t += 3
+				var s3 := [w[a], w[b], w[c]]
+				if s3[0] == s3[1] or s3[1] == s3[2] or s3[0] == s3[2]:
 					continue
-				var la: int = lab[i]
-				var lb: int = lab[(i + 1) % 3]
-				var pair := "%d:%d|%d" % [rig["id"], mini(la, lb), maxi(la, lb)]
-				var tt := 0.5
-				var pl := _plane(mini(la, lb), maxi(la, lb), rig)
-				if not pl.is_empty():
-					var su: float = (
-						(
-							xf * (pos_b[u / BLOCK] as PackedVector3Array)[u % BLOCK]
-							- (pl[0] as Vector3)
-						)
-						. dot(pl[1])
-					)
-					var sw: float = (
-						(
-							xf * (pos_b[w / BLOCK] as PackedVector3Array)[w % BLOCK]
-							- (pl[0] as Vector3)
-						)
-						. dot(pl[1])
-					)
-					if (su < 0.0) != (sw < 0.0):
-						tt = su / (su - sw)
-				m.append(_edge_vertex(u, w, tt, pair, made, pos, nrm, tan, col, uv, uv2))
-				wk.append(_weld_edge(u, w, vb))
-			if lab[0] != lab[1] and lab[1] != lab[2] and lab[0] != lab[2]:
-				# Three parts: each corner keeps the quad up to the triangle's centre.
-				var cv := _centre_vertex(tri, pos, nrm, tan, col, uv, uv2)
-				var ck := "c %d %d %d" % [e[5], tri[0], tri[1]]
-				for i in 3:
-					var prev := (i + 2) % 3
-					var key := _cut_key(rig, lab[i])
-					_tri_out([tri[i], m[i], cv], key, idx, keys, local, tri_group)
-					_tri_out([tri[i], cv, m[prev]], key, idx, keys, local, tri_group)
-					_cut_part(rig, lab[i])
-					_cap_edge(
-						caps, rig, lab[i], lab[(i + 1) % 3], wk[i], ck, xf * pos[m[i]], xf * pos[cv]
-					)
+				s3.sort()
+				var tk := Vector3i(s3[0], s3[1], s3[2])
+				if seen.has(tk):
+					continue
+				seen[tk] = true
+				keep.append([si, a, b, c])
+	var uses := {}
+	for pass_i in 8:
+		uses = {}
+		for k in keep:
+			for e in 3:
+				var ek := _edge_key(w[k[1 + e]], w[k[1 + (e + 1) % 3]])
+				uses[ek] = int(uses.get(ek, 0)) + 1
+		var k2: Array = []
+		for k in keep:
+			var ok := true
+			for e in 3:
+				if int(uses[_edge_key(w[k[1 + e]], w[k[1 + (e + 1) % 3]])]) > 2:
+					ok = false
+			if ok:
+				k2.append(k)
+		if k2.size() == keep.size():
+			break
+		keep = k2
+	# Cap: walk the boundary edges (edges one triangle uses) into loops and fill each with a fan.
+	var outs := {}  # welded a -> [welded b]
+	var at := {}  # welded vertex -> a source vertex
+	for k in keep:
+		for e in 3:
+			var ia: int = k[1 + e]
+			var ib: int = k[1 + (e + 1) % 3]
+			if int(uses[_edge_key(w[ia], w[ib])]) == 1:
+				outs[w[ia]] = (outs.get(w[ia], []) as Array) + [w[ib]]
+				at[w[ia]] = ia
+				at[w[ib]] = ib
+	var fill := PackedVector3Array()
+	var fill_col := Color(0, 0, 0, 0)
+	var fill_n := 0
+	for start in outs.keys():
+		while not (outs[start] as Array).is_empty():
+			var loop: Array = [start]
+			var cur = (outs[start] as Array).pop_back()
+			while cur != start:
+				loop.append(cur)
+				var nx: Array = outs.get(cur, [])
+				if nx.is_empty():
+					break
+				cur = nx.pop_back()
+			if cur != start or loop.size() < 3:
 				continue
-			# Two parts: corner `lone_i` is alone; edges lone_i and lone_i + 2 are cut.
-			var lone_i := 0
-			if lab[1] != lab[0] and lab[1] != lab[2]:
-				lone_i = 1
-			elif lab[2] != lab[0] and lab[2] != lab[1]:
-				lone_i = 2
-			var A: int = tri[lone_i]
-			var B: int = tri[(lone_i + 1) % 3]
-			var C: int = tri[(lone_i + 2) % 3]
-			var ab: int = m[lone_i]
-			var ca: int = m[(lone_i + 2) % 3]
-			var lone := _cut_key(rig, lab[lone_i])
-			var rest := _cut_key(rig, lab[(lone_i + 1) % 3])
-			_tri_out([A, ab, ca], lone, idx, keys, local, tri_group)
-			_tri_out([ab, B, C], rest, idx, keys, local, tri_group)
-			_tri_out([ab, C, ca], rest, idx, keys, local, tri_group)
-			_cut_part(rig, lab[lone_i])
-			_cut_part(rig, lab[(lone_i + 1) % 3])
-			_cap_edge(
-				caps,
-				rig,
-				lab[lone_i],
-				lab[(lone_i + 1) % 3],
-				wk[lone_i],
-				wk[(lone_i + 2) % 3],
-				xf * pos[ab],
-				xf * pos[ca]
-			)
-	var out: Array = []
-	out.resize(Mesh.ARRAY_MAX)
-	out[Mesh.ARRAY_VERTEX] = pos
-	if not nrm_b.is_empty():
-		out[Mesh.ARRAY_NORMAL] = nrm
-	if not tan_b.is_empty():
-		out[Mesh.ARRAY_TANGENT] = tan
-	if not col_b.is_empty():
-		out[Mesh.ARRAY_COLOR] = col
-	if not uv_b.is_empty():
-		out[Mesh.ARRAY_TEX_UV] = uv
-	if not uv2_b.is_empty():
-		out[Mesh.ARRAY_TEX_UV2] = uv2
-	out[Mesh.ARRAY_INDEX] = idx
-	var parts: Array = _gather(out, _blocks(pos), _blocks(idx), tri_group, keys.size())
-	for g in parts.size():
-		var pi: int = part_of[keys[g]] if part_of.has(keys[g]) else _part(keys[g])
-		_add(pi, e[1], parts[g], e[2], xf, "%s_%d" % [e[4], g])
-
-
-# Records one cut edge between parts a and b for the caps.
-func _cap_edge(
-	caps: Dictionary,
-	rig: Dictionary,
-	a: int,
-	b: int,
-	ka: String,
-	kb: String,
-	pa: Vector3,
-	pb: Vector3
-) -> void:
-	var lo := mini(a, b)
-	var hi := maxi(a, b)
-	var pair := "%d:%d|%d" % [rig["id"], lo, hi]
-	if not caps.has(pair):
-		caps[pair] = [lo, hi, null, [], rig]
-	(caps[pair][3] as Array).append([ka, kb, pa, pb])
-
-
-# A new vertex at the centre of a triangle, every attribute averaged.
-func _centre_vertex(
-	tri: Array,
-	pos: PackedVector3Array,
-	nrm: PackedVector3Array,
-	tan: PackedFloat32Array,
-	col: PackedColorArray,
-	uv: PackedVector2Array,
-	uv2: PackedVector2Array
-) -> int:
-	var a: int = tri[0]
-	var b: int = tri[1]
-	var c: int = tri[2]
-	var i := pos.size()
-	pos.append((pos[a] + pos[b] + pos[c]) / 3.0)
-	if not nrm.is_empty():
-		nrm.append((nrm[a] + nrm[b] + nrm[c]).normalized())
-	if not tan.is_empty():
-		var tv := Vector3.ZERO
-		for v in tri:
-			tv += Vector3(tan[v * 4], tan[v * 4 + 1], tan[v * 4 + 2])
-		tv = tv.normalized()
-		tan.append(tv.x)
-		tan.append(tv.y)
-		tan.append(tv.z)
-		tan.append(tan[a * 4 + 3])
-	if not col.is_empty():
-		col.append((col[a] + col[b] + col[c]) / 3.0)
-	if not uv.is_empty():
-		uv.append((uv[a] + uv[b] + uv[c]) / 3.0)
-	if not uv2.is_empty():
-		uv2.append((uv2[a] + uv2[b] + uv2[c]) / 3.0)
-	return i
-
-
-func _tri_out(
-	tri: Array,
-	key: String,
-	idx: PackedInt32Array,
-	keys: Array,
-	local: Dictionary,
-	groups: PackedInt32Array
-) -> void:
-	if not local.has(key):
-		local[key] = keys.size()
-		keys.append(key)
-	idx.append(tri[0])
-	idx.append(tri[1])
-	idx.append(tri[2])
-	groups.append(local[key])
-
-
-func _weld_edge(a: int, b: int, vb: Array) -> String:
-	var wa: int = (vb[a / BLOCK] as PackedInt32Array)[a % BLOCK]
-	var wb: int = (vb[b / BLOCK] as PackedInt32Array)[b % BLOCK]
-	return "%d %d" % [mini(wa, wb), maxi(wa, wb)]
-
-
-# The vertex where edge a-b crosses a plane, at share t from a, made once per edge and plane;
-# every attribute is interpolated.
-func _edge_vertex(
-	a: int,
-	b: int,
-	t: float,
-	pair: String,
-	made: Dictionary,
-	pos: PackedVector3Array,
-	nrm: PackedVector3Array,
-	tan: PackedFloat32Array,
-	col: PackedColorArray,
-	uv: PackedVector2Array,
-	uv2: PackedVector2Array
-) -> int:
-	var key := "%d %d %s" % [mini(a, b), maxi(a, b), pair]
-	if made.has(key):
-		return made[key]
-	if a > b:
-		var s := a
-		a = b
-		b = s
-		t = 1.0 - t
-	var i := pos.size()
-	pos.append(pos[a].lerp(pos[b], t))
-	if not nrm.is_empty():
-		nrm.append(nrm[a].lerp(nrm[b], t).normalized())
-	if not tan.is_empty():
-		var ta := Vector3(tan[a * 4], tan[a * 4 + 1], tan[a * 4 + 2])
-		var tb := Vector3(tan[b * 4], tan[b * 4 + 1], tan[b * 4 + 2])
-		var tv := ta.lerp(tb, t).normalized()
-		tan.append(tv.x)
-		tan.append(tv.y)
-		tan.append(tv.z)
-		tan.append(tan[a * 4 + 3])
-	if not col.is_empty():
-		col.append(col[a].lerp(col[b], t))
-	if not uv.is_empty():
-		uv.append(uv[a].lerp(uv[b], t))
-	if not uv2.is_empty():
-		uv2.append(uv2[a].lerp(uv2[b], t))
-	made[key] = i
-	return i
-
-
-# Closes the openings of every cut part: all cut edges around a part, from every part it touches,
-# are chained into loops (an opening where three parts meet, like the hips and two legs, is made
-# of pieces of two planes), and each closed loop is filled with a fan from its centre, facing out
-# of the part.
-func _emit_caps(caps: Dictionary, rigs: Dictionary) -> void:
-	var by_part := {}  # "rig id:part" -> [rig, part, segments]
-	for pair in caps:
-		var cap: Array = caps[pair]
-		var rig: Dictionary = cap[4]
-		for part in [cap[0], cap[1]]:
-			var k := "%d:%d" % [rig["id"], part]
-			if not by_part.has(k):
-				by_part[k] = [rig, part, []]
-			(by_part[k][2] as Array).append_array(cap[3])
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = CAP_COLOR
-	mat.roughness = 0.85
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	for k in by_part:
-		var rig: Dictionary = by_part[k][0]
-		var part: int = by_part[k][1]
-		var pi := _cut_part(rig, part)
-		var inside: Vector3 = (
-			(part_box[pi] as AABB).get_center() if part_box[pi] != null else Vector3.ZERO
-		)
-		var p := PackedVector3Array()
-		var nn := PackedVector3Array()
-		# Gaps up to a tenth of the part's size are closed.
-		var tol := 0.1 * ((part_box[pi] as AABB).size.length() if part_box[pi] != null else 0.0)
-		for loop in _loops(by_part[k][2], tol):
 			var c := Vector3.ZERO
-			for x in loop:
-				c += x
+			for v in loop:
+				c += pos[at[v]]
+				fill_col += _base_uv(src[mat_of[at[v]]][1], uv[at[v]])
+				fill_n += 1
 			c /= float(loop.size())
-			# Newell normal of the loop, turned to face out of the part.
-			var face := Vector3.ZERO
+			# The boundary runs a -> b in the shell's winding; the fill runs the other way.
 			for i in loop.size():
-				var a: Vector3 = loop[i]
-				var b: Vector3 = loop[(i + 1) % loop.size()]
-				face += Vector3(
-					(a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y)
-				)
-			face = face.normalized()
-			if face.dot(c - inside) < 0.0:
-				face = -face
-			for i in loop.size():
-				p.append(c)
-				p.append(loop[i])
-				p.append(loop[(i + 1) % loop.size()])
-				for j in 3:
-					nn.append(face)
+				fill.append(c)
+				fill.append(pos[at[loop[(i + 1) % loop.size()]]])
+				fill.append(pos[at[loop[i]]])
+	# The closed shell as one mesh, world space: a surface per source surface, then the fill.
+	var am := ArrayMesh.new()
+	for si in src.size():
+		var p := PackedVector3Array()
+		var t2 := PackedVector2Array()
+		for k in keep:
+			if k[0] != si:
+				continue
+			for e in 3:
+				p.append(pos[k[1 + e]])
+				t2.append(uv[k[1 + e]])
 		if p.is_empty():
 			continue
-		var arr: Array = []
-		arr.resize(Mesh.ARRAY_MAX)
-		arr[Mesh.ARRAY_VERTEX] = p
-		arr[Mesh.ARRAY_NORMAL] = nn
-		_add(pi, Mesh.PRIMITIVE_TRIANGLES, arr, mat, Transform3D.IDENTITY, "Cap")
-
-
-# Chains cut edges [key a, key b, point a, point b] into closed loops of points. Where three parts
-# meet, one triangle touching all three is kept whole, which leaves a short gap in the chain:
-# open chains are joined end to end across gaps shorter than `tol`. A chain that still does not
-# close is left open rather than filled with a fan that would cover more than the cut.
-func _loops(segs: Array, tol: float) -> Array:
-	var next := {}
-	var at := {}
-	for sgm in segs:
-		next[sgm[0]] = (next.get(sgm[0], []) as Array) + [sgm[1]]
-		next[sgm[1]] = (next.get(sgm[1], []) as Array) + [sgm[0]]
-		at[sgm[0]] = sgm[2]
-		at[sgm[1]] = sgm[3]
-	var used := {}
-	var closed: Array = []
-	var open: Array = []
-	for start in next:
-		if used.has(start) or (next[start] as Array).size() != 1:
+		var a := []
+		a.resize(Mesh.ARRAY_MAX)
+		a[Mesh.ARRAY_VERTEX] = p
+		a[Mesh.ARRAY_TEX_UV] = t2
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+		am.surface_set_material(am.get_surface_count() - 1, src[si][1])
+	if not fill.is_empty():
+		var a := []
+		a.resize(Mesh.ARRAY_MAX)
+		a[Mesh.ARRAY_VERTEX] = fill
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+		am.surface_set_material(am.get_surface_count() - 1, _flat(fill_col, fill_n))
+	# One capping box per cut part, in the limb's frame: from the joint plane out, around every
+	# vertex the planes give that part.
+	var frames := {}  # part -> [basis, lo, hi]
+	var near := {}  # part -> [colour sum, count] of vertices near its joint plane
+	var labelled := {}
+	for v in pos.size():
+		if labelled.has(w[v]):
 			continue
-		open.append(_walk(start, next, at, used))
-	for start in next:
-		if used.has(start):
-			continue
-		var pts := _walk(start, next, at, used)
-		if pts.size() >= 3:
-			closed.append(pts)
-	# Join open chains: repeatedly attach the chain whose end is nearest this chain's end.
-	while not open.is_empty():
-		var chain: Array = open.pop_back()
-		while true:
-			var best := -1
-			var best_d := tol
-			var flip := false
-			for j in open.size():
-				var o: Array = open[j]
-				var d0 := (chain[chain.size() - 1] as Vector3).distance_to(o[0])
-				var d1 := (chain[chain.size() - 1] as Vector3).distance_to(o[o.size() - 1])
-				if d0 < best_d:
-					best_d = d0
-					best = j
-					flip = false
-				if d1 < best_d:
-					best_d = d1
-					best = j
-					flip = true
-			if best < 0:
-				break
-			var o: Array = open.pop_at(best)
-			if flip:
-				o.reverse()
-			chain.append_array(o)
-		if chain.size() >= 3 and (chain[0] as Vector3).distance_to(chain[chain.size() - 1]) < tol:
-			closed.append(chain)
-	return closed
+		labelled[w[v]] = true
+		var x: Vector3 = pos[v]
+		var part := _label(x, rig)
+		if rig["axis"].has(part):
+			if not frames.has(part):
+				var n: Vector3 = rig["axis"][part]
+				var up := Vector3.UP if absf(n.dot(Vector3.UP)) < 0.9 else Vector3.RIGHT
+				var bx := up.cross(n).normalized()
+				frames[part] = [
+					Basis(bx, n.cross(bx), n), Vector3(INF, INF, INF), -Vector3(INF, INF, INF)
+				]
+			var f: Array = frames[part]
+			var bs: Basis = f[0]
+			var l: Vector3 = bs.transposed() * (x - (rig["joint"][part] as Vector3))
+			f[1] = (f[1] as Vector3).min(l)
+			f[2] = (f[2] as Vector3).max(l)
+		# Colour of the cut: the material around each joint plane.
+		for c in rig["axis"]:
+			var d: float = (x - (rig["joint"][c] as Vector3)).dot(rig["axis"][c])
+			if absf(d) < 0.03 * size and x.distance_to(rig["joint"][c]) < 0.3 * size:
+				var nc: Array = near.get(c, [Color(0, 0, 0, 0), 0])
+				nc[0] = (nc[0] as Color) + _base_uv(src[mat_of[v]][1], uv[v])
+				nc[1] = int(nc[1]) + 1
+				near[c] = nc
+	var boxes: Array = []  # [part, Transform3D, size, cut material]
+	for part in frames:
+		var f: Array = frames[part]
+		var l_lo: Vector3 = f[1]
+		var l_hi: Vector3 = f[2]
+		var pad := BOX_PAD * (l_hi - l_lo).length()
+		l_lo -= Vector3(pad, pad, 0.0)
+		l_hi += Vector3(pad, pad, pad)
+		l_lo.z = 0.0
+		var bs: Basis = f[0]
+		var centre: Vector3 = (rig["joint"][part] as Vector3) + bs * ((l_lo + l_hi) * 0.5)
+		var nc: Array = near.get(part, [Color(0, 0, 0, 0), 0])
+		# Sibling parts (two legs on the hips, two arms on the chest) are also split by the plane
+		# halfway between their joints, so one part's box never takes its sibling.
+		var halves_of: Array = []
+		var up_part: int = rig["up"].get(part, -1)
+		for sib in rig["kids"].get(up_part, []):
+			if sib == part or not rig["joint"].has(sib):
+				continue
+			var jc: Vector3 = rig["joint"][part]
+			var js: Vector3 = rig["joint"][sib]
+			if jc.distance_to(js) > 1e-9:
+				halves_of.append([(jc + js) * 0.5, (jc - js).normalized()])
+		boxes.append([part, Transform3D(bs, centre), l_hi - l_lo, _flat(nc[0], nc[1]), halves_of])
+	boxes.sort_custom(
+		func(a, b):
+			return (
+				(rig["depth"] as PackedInt32Array)[a[0]] > (rig["depth"] as PackedInt32Array)[b[0]]
+			)
+	)
+	# Cut: each part is the closed shell inside its box minus the boxes cut before it; the root
+	# part is the shell minus every box.
+	var made: Array = []  # [part, ArrayMesh]
+	for bi in boxes.size() + 1:
+		var csg := CSGMesh3D.new()
+		csg.mesh = am
+		if bi < boxes.size():
+			csg.add_child(_volume(boxes[bi], CSGShape3D.OPERATION_INTERSECTION, size))
+		for bj in boxes.size():
+			if bj < bi or bi == boxes.size():
+				csg.add_child(_volume(boxes[bj], CSGShape3D.OPERATION_SUBTRACTION, size))
+		root.add_child(csg)
+		csg.call("_update_shape")
+		var baked: ArrayMesh = csg.bake_static_mesh()
+		root.remove_child(csg)
+		csg.free()
+		var part: int = boxes[bi][0] if bi < boxes.size() else int(rig["root"])
+		if baked != null and baked.get_surface_count() > 0:
+			made.append([part, baked])
+	var root_made := false
+	for m in made:
+		if m[0] == int(rig["root"]):
+			root_made = true
+	if not root_made:
+		# Manifold refused the shell: it stays one piece, uncut.
+		push_warning("model_explode: the cut failed, the shell stays whole")
+		for e in src:
+			_add(_part(whole_key), Mesh.PRIMITIVE_TRIANGLES, e[0], e[1], e[2], "Shell")
+		return
+	for m in made:
+		var pi := _cut_part(rig, m[0])
+		var mi := MeshInstance3D.new()
+		mi.name = "Cut%d" % m[0]
+		mi.mesh = m[1]
+		(pieces[pi] as Node3D).add_child(mi)
+		mi.global_transform = Transform3D.IDENTITY
+		var bb: AABB = (m[1] as ArrayMesh).get_aabb()
+		part_box[pi] = bb if part_box[pi] == null else (part_box[pi] as AABB).merge(bb)
 
 
-func _walk(start, next: Dictionary, at: Dictionary, used: Dictionary) -> Array:
-	var pts: Array = [at[start]]
-	used[start] = true
-	var cur = start
-	while true:
-		var step = null
-		for k in next[cur]:
-			if not used.has(k):
-				step = k
-				break
-		if step == null:
-			break
-		used[step] = true
-		pts.append(at[step])
-		cur = step
-	return pts
+func _edge_key(a: int, b: int) -> Vector2i:
+	return Vector2i(mini(a, b), maxi(a, b))
+
+
+# A part's capping volume: its box, cut by the half-spaces toward it from its siblings.
+func _volume(b: Array, op: int, size: float) -> CSGShape3D:
+	var box := CSGBox3D.new()
+	box.size = b[2]
+	box.transform = b[1]
+	box.material = b[3]
+	if (b[4] as Array).is_empty():
+		box.operation = op
+		return box
+	var vol := CSGCombiner3D.new()
+	vol.operation = op
+	vol.add_child(box)
+	for h in b[4]:
+		# A cube 4x the model's size whose face lies on the plane, on the part's side.
+		var n: Vector3 = h[1]
+		var up := Vector3.UP if absf(n.dot(Vector3.UP)) < 0.9 else Vector3.RIGHT
+		var bx := up.cross(n).normalized()
+		var half := CSGBox3D.new()
+		var big := 4.0 * size
+		half.size = Vector3(big, big, big)
+		half.transform = Transform3D(Basis(bx, n.cross(bx), n), (h[0] as Vector3) + n * big * 0.5)
+		half.operation = CSGShape3D.OPERATION_INTERSECTION
+		half.material = b[3]
+		vol.add_child(half)
+	return vol
+
+
+# A plain material in the mean of `n` summed colours (CAP_COLOR when n is 0).
+func _flat(sum: Color, n: int) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	var c := sum / float(n) if n > 0 else CAP_COLOR
+	c.a = 1.0
+	m.albedo_color = c
+	m.roughness = 0.85
+	return m
+
+
+# The material's base colour at vertex v: its base colour texture at the vertex's UV times its
+# base colour, so a cap shows the colour of the skin or cloth it cuts through.
+func _base_at(mat: Material, uv: PackedVector2Array, v: int) -> Color:
+	return _base_uv(mat, uv[v] if v < uv.size() else Vector2(-1, -1))
+
+
+func _base_uv(mat: Material, t: Vector2) -> Color:
+	if not base_of.has(mat):
+		base_of[mat] = _base_of(mat)
+	var b: Array = base_of[mat]
+	var c: Color = b[1]
+	var img := b[0] as Image
+	if img != null and t.x >= -0.5:
+		var x := clampi(int(fposmod(t.x, 1.0) * img.get_width()), 0, img.get_width() - 1)
+		var y := clampi(int(fposmod(t.y, 1.0) * img.get_height()), 0, img.get_height() - 1)
+		c *= img.get_pixel(x, y)
+	c.a = 1.0
+	return c
+
+
+# [base colour image or null, base colour] of a material: a BaseMaterial3D's albedo, or the first
+# colour and texture parameters a shader material names as its base (MToon _Color/_MainTex).
+func _base_of(mat: Material) -> Array:
+	var col := CAP_COLOR
+	var tex: Texture2D = null
+	if mat is BaseMaterial3D:
+		col = (mat as BaseMaterial3D).albedo_color
+		tex = (mat as BaseMaterial3D).albedo_texture
+	elif mat is ShaderMaterial and (mat as ShaderMaterial).shader != null:
+		var sm := mat as ShaderMaterial
+		for u in sm.shader.get_shader_uniform_list():
+			var n: String = String(u["name"]).to_lower()
+			var val = sm.get_shader_parameter(u["name"])
+			var base := (
+				n in ["_color", "albedo", "albedo_color", "base_color", "_basecolor"]
+				or n.ends_with("color_factor")
+			)
+			var base_tex := (
+				n in ["_maintex", "texture_albedo", "albedo_texture", "base_color_texture"]
+				or n.ends_with("basecolortexture")
+			)
+			if base and val is Color:
+				col = val
+			elif base_tex and val is Texture2D:
+				tex = val
+	var img: Image = null
+	if tex != null:
+		img = tex.get_image()
+		if img != null:
+			img = img.duplicate()
+			if img.is_compressed():
+				img.decompress()
+			if img.has_mipmaps():
+				img.clear_mipmaps()
+			# Small copy: the cap only needs the colour around the cut.
+			if img.get_width() > 256:
+				img.resize(256, maxi(1, img.get_height() * 256 / img.get_width()))
+	return [img, col]
 
 
 # The piece for a key, made on first use; a cut part also has its depth, limb axis and joint.

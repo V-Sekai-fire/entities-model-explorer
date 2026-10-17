@@ -53,8 +53,7 @@ func _ready() -> void:
 	# WebGPU has no line polygon mode, so Godot's wireframe view draws solid there. On the web the
 	# Wireframe tool instead adds a line copy of every mesh (same vertices, skin and skeleton).
 	if OS.has_feature("web"):
-		var cb: CheckBox = root.get_node("Node/ToolPanel/MarginContainer/Row/CbWireframe")
-		cb.toggled.connect(_web_wireframe)
+		root.get_node("Node").wireframe_toggled.connect(_web_wireframe)
 	hint = Label.new()
 	hint.add_theme_font_size_override("font_size", 13)
 	hint.add_theme_color_override("font_color", Color(0.13, 0.13, 0.13))

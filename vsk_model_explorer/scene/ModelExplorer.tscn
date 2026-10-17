@@ -130,42 +130,6 @@ layout_mode = 2
 size_flags_horizontal = 4
 text = "Loading..."
 
-[node name="ToolPanel" type="PanelContainer" parent="Node" unique_id=2114674250]
-visible = false
-anchors_preset = 1
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -143.0
-offset_bottom = 93.0
-grow_horizontal = 0
-
-[node name="MarginContainer" type="MarginContainer" parent="Node/ToolPanel" unique_id=1666635319]
-layout_mode = 2
-theme_override_constants/margin_left = 16
-theme_override_constants/margin_top = 16
-theme_override_constants/margin_right = 16
-theme_override_constants/margin_bottom = 16
-
-[node name="Row" type="VBoxContainer" parent="Node/ToolPanel/MarginContainer" unique_id=744968282]
-layout_mode = 2
-
-[node name="Label" type="Label" parent="Node/ToolPanel/MarginContainer/Row" unique_id=223676777]
-layout_mode = 2
-text = "Tool"
-
-[node name="CbWireframe" type="CheckBox" parent="Node/ToolPanel/MarginContainer/Row" unique_id=351218458]
-layout_mode = 2
-text = "Wireframe (W)"
-
-[node name="CbExplode" type="CheckBox" parent="Node/ToolPanel/MarginContainer/Row" unique_id=1532844001]
-layout_mode = 2
-tooltip_text = "Move all meshes away from the center to easily check how may meshes are there"
-text = "Explode (E)"
-
-[node name="CbHideGrid" type="CheckBox" parent="Node/ToolPanel/MarginContainer/Row" unique_id=748838344]
-layout_mode = 2
-text = "Hide Grid (G)"
-
 [node name="MessagePanel" type="PanelContainer" parent="Node" unique_id=205190248]
 anchors_preset = 8
 anchor_left = 0.5
@@ -197,6 +161,3 @@ text = "Drop 3d model into this window"
 [connection signal="gltf_is_loaded" from="." to="CamController" method="_on_root_gltf_is_loaded"]
 [connection signal="gltf_is_loaded" from="." to="Node" method="_on_root_gltf_is_loaded"]
 [connection signal="gltf_start_to_load" from="." to="Node" method="_on_root_gltf_start_to_load"]
-[connection signal="toggled" from="Node/ToolPanel/MarginContainer/Row/CbWireframe" to="Node" method="_on_cb_wireframe_toggled"]
-[connection signal="toggled" from="Node/ToolPanel/MarginContainer/Row/CbExplode" to="Node" method="_on_cb_explode_toggled"]
-[connection signal="toggled" from="Node/ToolPanel/MarginContainer/Row/CbHideGrid" to="Node" method="_on_cb_hide_grid_toggled"]

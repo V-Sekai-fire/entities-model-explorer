@@ -3,14 +3,16 @@ extends Node
 @export var Grid: Node
 
 @onready var InfoPanel: PanelContainer = $InfoPanel
-@onready var ToolPanel: PanelContainer = $ToolPanel
 @onready var LoadingPanel: PanelContainer = $LoadingPanel
 @onready var MsgPanel: PanelContainer = $MessagePanel
 @onready var MsgLabel: Label = $MessagePanel/MarginContainer/Label
 @onready var Row: VBoxContainer = $InfoPanel/MarginContainer/Row
-@onready var CbWireframe: CheckBox = $ToolPanel/MarginContainer/Row/CbWireframe
-@onready var CbExplode: CheckBox = $ToolPanel/MarginContainer/Row/CbExplode
-@onready var CbHideGrid: CheckBox = $ToolPanel/MarginContainer/Row/CbHideGrid
+
+# W and G toggle these. The controls card (bottom right) is the one place that lists them; there is
+# no tool panel, so the right side has one surface.
+signal wireframe_toggled(on: bool)
+var wireframe_on := false
+var grid_hidden := false
 
 var animationPlayers: Array[Node]
 
@@ -26,7 +28,6 @@ var meshViewer
 const DYNAMIC_CONTROL_GROUP = "dynamic control"
 
 var maxAabb: AABB
-var exploder = preload("res://addons/model_explode/explode.gd").new()
 
 
 func _ready():
@@ -35,13 +36,13 @@ func _ready():
 
 func _process(_delta):
 	if Input.is_action_just_pressed("toggle_wireframe"):
-		CbWireframe.button_pressed = not CbWireframe.button_pressed
-
-	if Input.is_action_just_pressed("explode_meshes"):
-		CbExplode.button_pressed = not CbExplode.button_pressed
+		wireframe_on = not wireframe_on
+		_set_wireframe(wireframe_on)
+		wireframe_toggled.emit(wireframe_on)
 
 	if Input.is_action_just_pressed("toggle_grid"):
-		CbHideGrid.button_pressed = not CbHideGrid.button_pressed
+		grid_hidden = not grid_hidden
+		_set_grid_hidden(grid_hidden)
 
 
 func _on_scroll_input(event, from_control: Tree):
@@ -69,7 +70,6 @@ func _on_scroll_input(event, from_control: Tree):
 
 func _on_root_gltf_start_to_load():
 	InfoPanel.visible = false
-	ToolPanel.visible = false
 	MsgPanel.visible = false
 	LoadingPanel.visible = true
 
@@ -80,16 +80,12 @@ func _on_root_gltf_start_to_load():
 
 func _on_root_gltf_is_loaded(success, gltf: Node):
 	Input.action_press("close_popup")
-	if exploder.is_exploded():
-		exploder.implode()
-		CbExplode.set_pressed_no_signal(false)
 	if not success:
 		MsgLabel.text = "Failed to load model..."
 		MsgPanel.visible = true
 		return
 
 	InfoPanel.visible = true
-	ToolPanel.visible = true
 	LoadingPanel.visible = false
 
 	var queue = []
@@ -416,7 +412,7 @@ func calc_data_size(byte_size: int) -> String:
 	return "%.2f %s" % [size, unit]
 
 
-func _on_cb_wireframe_toggled(button_pressed):
+func _set_wireframe(button_pressed):
 	if button_pressed:
 		get_viewport().debug_draw = Viewport.DEBUG_DRAW_WIREFRAME
 	else:
@@ -515,19 +511,7 @@ func _show_texture_viewer(tex):
 	add_child.call_deferred(texViewer)
 
 
-func _on_cb_explode_toggled(button_pressed):
-	# addons/model_explode: pieces split by surface, moved apart so that no two intersect.
-	if button_pressed:
-		var nodes = []
-		nodes.append_array(get_tree().get_nodes_in_group(GlobalSignal.FBX_GROUP))
-		nodes.append_array(get_tree().get_nodes_in_group(GlobalSignal.GLTF_GROUP))
-		exploder.explode(nodes, get_tree().current_scene)
-		exploder.print_layout()
-	else:
-		exploder.implode()
-
-
-func _on_cb_hide_grid_toggled(button_pressed):
+func _set_grid_hidden(button_pressed):
 	if Grid != null:
 		Grid.visible = not button_pressed
 

@@ -8,13 +8,14 @@ extends Control
 # row with add_row().
 
 const CardStyle = preload("res://vsk_model_explorer/core/CardStyle.gd")
-const INK := CardStyle.INK
-const MUTE := CardStyle.MUTE
-const LIT := CardStyle.LIT
 const ROW := 34.0
-const PAD := CardStyle.PAD
+const PAD := 14.0
 const ICON_W := 40.0
-const MARGIN := CardStyle.MARGIN
+const MARGIN := 16.0
+
+var INK: Color
+var MUTE: Color
+var LIT: Color
 
 # kind: "mouse" (part = left / right / middle / wheel), "keys" (part = key names), "file".
 const ROWS := [
@@ -34,6 +35,10 @@ var rows: Array = []
 
 
 func _init() -> void:
+	var p := CardStyle.palette()
+	INK = p["ink"]
+	MUTE = p["mute"]
+	LIT = p["lit"]
 	for r in ROWS:
 		rows.append(r)
 

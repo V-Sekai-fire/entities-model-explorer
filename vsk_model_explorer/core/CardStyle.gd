@@ -18,6 +18,13 @@ const TEXT := 13
 const HEADING := 11
 
 
+# The colours for code that draws by hand (ControlsCard.gd). Read them through this call: the web
+# build's GDScript compiler turns a constant copied from another script (const A := CardStyle.INK)
+# into black.
+static func palette() -> Dictionary:
+	return {"ink": INK, "mute": MUTE, "lit": LIT}
+
+
 static func card_box() -> StyleBoxFlat:
 	var b := StyleBoxFlat.new()
 	b.bg_color = CARD

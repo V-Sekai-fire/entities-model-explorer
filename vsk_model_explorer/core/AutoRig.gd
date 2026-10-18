@@ -17,6 +17,8 @@ const COOP := 4
 const DONE := 5
 const ERROR := 6
 const UPLOAD_CHUNK := 32 << 20
+const SAVED := "Auto-rig saved "
+const SAVED_SECONDS := 10.0
 
 var source := ""
 var busy := false
@@ -57,7 +59,7 @@ func _on_test_loaded(ok: bool, _gltf: Node) -> void:
 		printerr("AUTO-RIG-FAIL the model did not open")
 		get_tree().quit(1)
 	elif _test_rigged:
-		print("AUTO-RIG-OPENED")
+		print("AUTO-RIG-OPENED shown=%s %s" % [_label.get_parent().visible, _label.text])
 		get_tree().quit(0)
 	else:
 		await start()
@@ -75,7 +77,7 @@ func weights_dir() -> String:
 func show_status(text: String) -> void:
 	_label.text = text
 	_label.get_parent().visible = text != ""
-	if _test and text != "" and not text.begins_with("Auto-rig: "):
+	if _test and text != "" and not text.begins_with("Auto-rig: ") and not text.begins_with(SAVED):
 		printerr("AUTO-RIG-FAIL ", text)
 
 
@@ -95,9 +97,18 @@ func start() -> void:
 	var out := await run(source)
 	busy = false
 	if out != "":
-		show_status("")
+		show_saved(out)
 		_test_rigged = true
 		rigged.emit(out)
+
+
+# The result path stays on screen for SAVED_SECONDS, unless a newer message replaces it.
+func show_saved(path: String) -> void:
+	var text := SAVED + path
+	show_status(text)
+	await get_tree().create_timer(SAVED_SECONDS).timeout
+	if _label.text == text:
+		show_status("")
 
 
 func run(mesh: String) -> String:

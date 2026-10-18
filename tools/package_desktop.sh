@@ -65,12 +65,12 @@ lay windows godot.windows.template_release.double.x86_64.llvm.exe skintokens-vie
   libgodot_riscv.windows.template_release.double.x86_64.dll
 lay linux godot.linuxbsd.template_release.double.x86_64 skintokens-viewer \
   libgodot_riscv.linux.template_release.double.x86_64.so
-# Zips hold the files at the top level: Explorer and Archive Utility already extract into a folder
-# named after the zip, so a top folder inside it would give skintokens-viewer-*/skintokens-viewer/.
+# Archives hold the files at the top level: Explorer and Archive Utility already extract into a folder
+# named after the archive, so a top folder inside it would give skintokens-viewer-*/skintokens-viewer/.
 rm -f "$out"/skintokens-viewer-*.zip
 (cd "$out/macos/skintokens-viewer" && zip -qry -n .gguf ../../skintokens-viewer-macos-arm64.zip .)
 (cd "$out/windows/skintokens-viewer" && zip -qr -n .gguf ../../skintokens-viewer-windows-x86_64.zip .)
-(cd "$out/linux" && tar -cf ../skintokens-viewer-linux-x86_64.tar skintokens-viewer)
+(cd "$out/linux/skintokens-viewer" && tar -cf ../../skintokens-viewer-linux-x86_64.tar -- *)
 (cd "$out" && sha256sum skintokens-viewer-*.zip skintokens-viewer-*.tar > SHA256SUMS 2>/dev/null \
   || shasum -a 256 skintokens-viewer-*.zip skintokens-viewer-*.tar > SHA256SUMS)
 cat "$out/SHA256SUMS"

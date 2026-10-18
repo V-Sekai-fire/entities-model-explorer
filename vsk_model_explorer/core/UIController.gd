@@ -16,6 +16,10 @@ var grid_hidden := false
 var exploded := false
 
 var animationPlayers: Array[Node]
+# The animation list's Loop toggle: on (the default) repeats the clip; off plays it once and then
+# returns to RESET.
+var loop_on := true
+var playing: Array = []
 
 const TextureViewer = preload("res://vsk_model_explorer/scene/TextureViewer.tscn")
 var texViewer
@@ -416,6 +420,14 @@ func _on_root_gltf_is_loaded(success, gltf: Node):
 				animItem.set_metadata(1, anim)
 
 			Row.add_child.call_deferred(animationTree)
+			var loopToggle := CheckButton.new()
+			loopToggle.add_to_group(DYNAMIC_CONTROL_GROUP)
+			loopToggle.text = "Loop"
+			loopToggle.tooltip_text = "On: the clip repeats. Off: the clip plays once."
+			loopToggle.button_pressed = loop_on
+			loopToggle.focus_mode = Control.FOCUS_NONE
+			loopToggle.toggled.connect(_set_loop)
+			Row.add_child.call_deferred(loopToggle)
 
 	# Create convex collision
 	for mesh in meshes:
@@ -502,7 +514,10 @@ func _on_animation_item_double_clicked(tree: Tree):
 		callable = callable.bind(player, animationPlayers)
 		if not player.animation_finished.is_connected(callable):
 			player.animation_finished.connect(callable)
-		player.queue(anim)
+		if anim != "RESET":
+			playing = [player, anim]
+			_apply_loop()
+		player.play(anim)
 	if anim == "RESET":
 		var animation_players: Array[Node] = owner.find_children("*", "AnimationPlayer")
 		for node in animation_players:
@@ -519,6 +534,18 @@ func _on_animation_item_double_clicked(tree: Tree):
 			if node.get_mesh() is ArrayMesh:
 				for i in range(node.get_mesh().get_blend_shape_count()):
 					node.set("blend_shapes/" + node.get_mesh().get_blend_shape_name(i), 0)
+
+
+func _set_loop(on: bool) -> void:
+	loop_on = on
+	_apply_loop()
+
+
+func _apply_loop() -> void:
+	if playing.is_empty() or playing[0] == null or not playing[0].has_animation(playing[1]):
+		return
+	var a: Animation = playing[0].get_animation(playing[1])
+	a.loop_mode = Animation.LOOP_LINEAR if loop_on else Animation.LOOP_NONE
 
 
 func _on_animation_item_finished(

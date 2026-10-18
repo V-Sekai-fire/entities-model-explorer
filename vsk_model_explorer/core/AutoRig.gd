@@ -219,11 +219,15 @@ func _stop(why: String) -> PackedByteArray:
 
 func run_vrm(path: String) -> String:
 	var t0 := Time.get_ticks_msec()
-	show_status("Auto-rig: saving as VRM 1.0...")
-	var vrm1 := OS.get_user_data_dir().path_join("vrm1.tmp.glb")
-	var why := save_vrm1(path, vrm1)
-	if why != "":
-		return fail(why)
+	# A VRM 1.0 already faces +Z and goes in as it is; a godot-vrm round trip can move its
+	# vertices (up to 11 cm measured). A VRM 0.x is turned to +Z by godot-vrm first.
+	var vrm1 := path
+	if not is_vrm1(path):
+		show_status("Auto-rig: saving as VRM 1.0...")
+		vrm1 = OS.get_user_data_dir().path_join("vrm1.tmp.glb")
+		var why := save_vrm1(path, vrm1)
+		if why != "":
+			return fail(why)
 	_sb = ClassDB.instantiate("Sandbox")
 	_sb.memory_max = 1024
 	_sb.references_max = 4096
@@ -236,7 +240,8 @@ func run_vrm(path: String) -> String:
 	show_status("Auto-rig: T-pose...")
 	_sb.vmcall("skintokens_vrm_start", vrm1)
 	var bytes := await drive(t0)
-	DirAccess.remove_absolute(vrm1)
+	if vrm1 != path:
+		DirAccess.remove_absolute(vrm1)
 	if bytes.is_empty():
 		return ""
 	cleanup()
@@ -251,6 +256,19 @@ func run_vrm(path: String) -> String:
 	f.close()
 	print("AUTO-RIG-OK %s bytes=%d ms=%d" % [out, bytes.size(), Time.get_ticks_msec() - t0])
 	return out
+
+
+# True when the file's glTF JSON carries the VRM 1.0 extension (VRMC_vrm).
+func is_vrm1(path: String) -> bool:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null or f.get_length() < 20 or f.get_32() != 0x46546C67:
+		return false
+	f.seek(12)
+	var size := f.get_32()
+	if f.get_32() != 0x4E4F534A or size > f.get_length():
+		return false
+	var root = JSON.parse_string(f.get_buffer(size).get_string_from_utf8())
+	return root is Dictionary and root.get("extensions", {}).has("VRMC_vrm")
 
 
 # godot-vrm reads any VRM (a VRM 0.x turns to face +Z) and writes VRM 1.0. One root node: in the

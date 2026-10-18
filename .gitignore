@@ -23,3 +23,9 @@ target
 .github/dagger/cue.mod
 build
 third_party
+
+# Desktop auto-rig inputs, fetched by tools/desktop_rig_deps.sh, never committed
+/addons/godot_sandbox/
+/skintokens.elf
+/w
+/skintokens.elf.uid

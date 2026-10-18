@@ -10,6 +10,8 @@ var worker: Worker
 
 const gltf_vrm_extension_const = preload("res://addons/vrm/vrm_extension.gd")
 const ControlsCard = preload("res://vsk_model_explorer/core/ControlsCard.gd")
+const AutoRig = preload("res://vsk_model_explorer/core/AutoRig.gd")
+var auto_rig: Node
 
 var gltf_doc = GLTFDocument.new()
 var gltf_vrm_extension = gltf_vrm_extension_const.new()
@@ -23,6 +25,11 @@ func _ready():
 	get_viewport().files_dropped.connect(_on_file_dropped)
 	# The controls card, bottom right on top of the 3D view; H shows or hides it.
 	_ensure_controls_card()
+	if not OS.has_feature("web"):
+		auto_rig = AutoRig.new()
+		add_child(auto_rig)
+		auto_rig.rigged.connect(_load_file)
+		add_control_row(["keys", ["R"], "R", "Auto-rig a .glb"])
 	if ClassDB.get_class_list().find("FBXDocument") != -1:
 		fbx_doc = ClassDB.instantiate("FBXDocument")
 
@@ -82,6 +89,8 @@ func _load_file(file_path: String):
 		return
 
 	var ext = normalized_path.get_extension().to_lower()
+	if auto_rig:
+		auto_rig.source = normalized_path
 
 	if ext == "glb" or ext == "gltf" or ext == "vrm":
 		gltf_start_to_load.emit()

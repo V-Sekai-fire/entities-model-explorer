@@ -3,6 +3,8 @@ extends Node
 # local RenderingDevice (Vulkan, Metal or D3D12), and opens the result. The weights are the three
 # GGUF files in the folder `w` beside the program. The rigged GLB is saved beside the source
 # file as <name>.rigged.glb, or in the user folder if that one is read-only.
+# A .vrm keeps its own skeleton: R saves it as VRM 1.0 (godot-vrm), puts it in a T-pose from any
+# pose and turns each joint's +Y along its bone (skintokens.elf, no weights), as <name>.tpose.vrm.
 # Test mode: `-- <file.glb> --auto-rig-quit` rigs the file once it is open, opens the result,
 # then quits with 0, or with 1 on any failure.
 
@@ -19,6 +21,14 @@ const ERROR := 6
 const UPLOAD_CHUNK := 32 << 20
 const SAVED := "Auto-rig saved "
 const SAVED_SECONDS := 10.0
+const VRM_EXTENSIONS := [
+	"res://addons/vrm/vrm_extension.gd",
+	"res://addons/vrm/1.0/VRMC_vrm.gd",
+	"res://addons/vrm/1.0/VRMC_node_constraint.gd",
+	"res://addons/vrm/1.0/VRMC_springBone.gd",
+	"res://addons/vrm/1.0/VRMC_materials_hdr_emissiveMultiplier.gd",
+	"res://addons/vrm/1.0/VRMC_materials_mtoon.gd",
+]
 
 var source := ""
 var busy := false
@@ -85,9 +95,21 @@ func start() -> void:
 	if busy:
 		return
 	if source == "":
-		return show_status("Open a .glb file first, then press R.")
-	if source.get_extension().to_lower() != "glb":
-		return show_status("Auto-rig reads .glb files only.")
+		return show_status("Open a .glb or .vrm file first, then press R.")
+	var ext := source.get_extension().to_lower()
+	if ext != "glb" and ext != "vrm":
+		return show_status("Auto-rig reads .glb and .vrm files only.")
+	if ext == "vrm":
+		if not ClassDB.class_exists("Sandbox"):
+			return show_status("Auto-rig needs the godot-sandbox library beside the program.")
+		busy = true
+		var posed := await run_vrm(source)
+		busy = false
+		if posed != "":
+			show_saved(posed)
+			_test_rigged = true
+			rigged.emit(posed)
+		return
 	for f in ["mesh-encoder.gguf", "skin-vae.gguf", "tokenrig.gguf"]:
 		if not FileAccess.file_exists(weights_dir().path_join(f)):
 			return show_status("Auto-rig needs %s in %s." % [f, weights_dir()])
@@ -131,42 +153,9 @@ func run(mesh: String) -> String:
 	_sb.vmcall(
 		"skintokens_start", weights_dir(), mesh, "beams=1 temperature=0 GGML_RD_MAX_BUFFER_MB=128"
 	)
-	var feed := PackedByteArray()
-	while true:
-		var r = _sb.vmcall("skintokens_pump", feed)
-		feed = PackedByteArray()
-		if typeof(r) != TYPE_ARRAY or r.size() < 3:
-			return fail("the rig program stopped")
-		var hdr: PackedInt64Array = r[0]
-		match hdr[0]:
-			DONE:
-				break
-			ERROR:
-				return fail(str(r[1]).strip_edges())
-			WAIT_GPU, COOP:
-				show_status("Auto-rig: %d s" % ((Time.get_ticks_msec() - t0) / 1000))
-				await get_tree().process_frame
-			READ:
-				feed = read(str(r[1]), hdr[1], hdr[2] if hdr[2] > 0 else 1 << 40)
-			UPLOAD:
-				var done := 0
-				while done < hdr[2]:
-					var n: int = min(hdr[2] - done, UPLOAD_CHUNK)
-					var b := read(str(r[1]), hdr[1] + done, n)
-					if b.size() != n or _rd.buffer_update(r[2], hdr[3] + done, n, b) != OK:
-						return fail("could not load the weights to the GPU")
-					done += n
-			_:
-				return fail("unknown request %d" % hdr[0])
-	var size := int(_sb.vmcall("skintokens_result_size"))
-	var glb := PackedByteArray()
-	while glb.size() < size:
-		var chunk: PackedByteArray = _sb.vmcall(
-			"skintokens_result_chunk", glb.size(), size - glb.size()
-		)
-		if chunk.is_empty():
-			return fail("the result is incomplete")
-		glb.append_array(chunk)
+	var glb := await drive(t0)
+	if glb.is_empty():
+		return ""
 	cleanup()
 	var out := mesh.get_basename() + ".rigged.glb"
 	var f := FileAccess.open(out, FileAccess.WRITE)
@@ -179,6 +168,119 @@ func run(mesh: String) -> String:
 	f.close()
 	print("AUTO-RIG-OK %s bytes=%d ms=%d" % [out, glb.size(), Time.get_ticks_msec() - t0])
 	return out
+
+
+# Runs the started job to the end: answers its file reads and weight uploads, and returns the
+# result bytes, or nothing after fail().
+func drive(t0: int) -> PackedByteArray:
+	var feed := PackedByteArray()
+	while true:
+		var r = _sb.vmcall("skintokens_pump", feed)
+		feed = PackedByteArray()
+		if typeof(r) != TYPE_ARRAY or r.size() < 3:
+			return _stop("the rig program stopped")
+		var hdr: PackedInt64Array = r[0]
+		match hdr[0]:
+			DONE:
+				break
+			ERROR:
+				return _stop(str(r[1]).strip_edges())
+			WAIT_GPU, COOP:
+				show_status("Auto-rig: %d s" % ((Time.get_ticks_msec() - t0) / 1000))
+				await get_tree().process_frame
+			READ:
+				feed = read(str(r[1]), hdr[1], hdr[2] if hdr[2] > 0 else 1 << 40)
+			UPLOAD:
+				var done := 0
+				while done < hdr[2]:
+					var n: int = min(hdr[2] - done, UPLOAD_CHUNK)
+					var b := read(str(r[1]), hdr[1] + done, n)
+					if b.size() != n or _rd.buffer_update(r[2], hdr[3] + done, n, b) != OK:
+						return _stop("could not load the weights to the GPU")
+					done += n
+			_:
+				return _stop("unknown request %d" % hdr[0])
+	var size := int(_sb.vmcall("skintokens_result_size"))
+	var glb := PackedByteArray()
+	while glb.size() < size:
+		var chunk: PackedByteArray = _sb.vmcall(
+			"skintokens_result_chunk", glb.size(), size - glb.size()
+		)
+		if chunk.is_empty():
+			return _stop("the result is incomplete")
+		glb.append_array(chunk)
+	return glb
+
+
+func _stop(why: String) -> PackedByteArray:
+	fail(why)
+	return PackedByteArray()
+
+
+func run_vrm(path: String) -> String:
+	var t0 := Time.get_ticks_msec()
+	show_status("Auto-rig: saving as VRM 1.0...")
+	var vrm1 := OS.get_user_data_dir().path_join("vrm1.tmp.glb")
+	var why := save_vrm1(path, vrm1)
+	if why != "":
+		return fail(why)
+	_sb = ClassDB.instantiate("Sandbox")
+	_sb.memory_max = 1024
+	_sb.references_max = 4096
+	_sb.allocations_max = 10000000
+	_sb.execution_timeout = 0
+	add_child(_sb)
+	_sb.load_buffer(FileAccess.get_file_as_bytes(ELF))
+	if not _sb.has_function("skintokens_vrm_start"):
+		return fail("skintokens.elf has no VRM step")
+	show_status("Auto-rig: T-pose...")
+	_sb.vmcall("skintokens_vrm_start", vrm1)
+	var bytes := await drive(t0)
+	DirAccess.remove_absolute(vrm1)
+	if bytes.is_empty():
+		return ""
+	cleanup()
+	var out := path.get_basename() + ".tpose.vrm"
+	var f := FileAccess.open(out, FileAccess.WRITE)
+	if f == null:
+		out = OS.get_user_data_dir().path_join(path.get_file().get_basename() + ".tpose.vrm")
+		f = FileAccess.open(out, FileAccess.WRITE)
+	if f == null:
+		return fail("cannot save the result")
+	f.store_buffer(bytes)
+	f.close()
+	print("AUTO-RIG-OK %s bytes=%d ms=%d" % [out, bytes.size(), Time.get_ticks_msec() - t0])
+	return out
+
+
+# godot-vrm reads any VRM (a VRM 0.x turns to face +Z) and writes VRM 1.0. One root node: in the
+# multi-root mode Godot leaves a root skeleton's root bone out of the scene, and the meshes vanish.
+func save_vrm1(path: String, out: String) -> String:
+	var extensions := []
+	for script in VRM_EXTENSIONS:
+		var e: GLTFDocumentExtension = load(script).new()
+		extensions.append(e)
+		GLTFDocument.register_gltf_document_extension(e)
+	var why := ""
+	var doc := GLTFDocument.new()
+	var state := GLTFState.new()
+	state.handle_binary_image = GLTFState.HANDLE_BINARY_EMBED_AS_UNCOMPRESSED
+	if doc.append_from_file(path, state) != OK:
+		why = "godot-vrm cannot read " + path.get_file()
+	else:
+		var root := doc.generate_scene(state)
+		var writer := GLTFDocument.new()
+		writer.root_node_mode = GLTFDocument.ROOT_NODE_MODE_SINGLE_ROOT
+		var written := GLTFState.new()
+		written.set_meta("vrm", "1.0")
+		if writer.append_from_scene(root, written, 16) != OK:  # 16 = named skin binds
+			why = "godot-vrm cannot convert " + path.get_file()
+		elif writer.write_to_filesystem(written, out) != OK:
+			why = "cannot write " + out
+		root.queue_free()
+	for e in extensions:
+		GLTFDocument.unregister_gltf_document_extension(e)
+	return why
 
 
 func read(path: String, first: int, count: int) -> PackedByteArray:

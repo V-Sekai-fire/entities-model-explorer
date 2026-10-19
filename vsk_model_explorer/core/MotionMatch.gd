@@ -286,8 +286,7 @@ func stop() -> void:
 	remove_from_group("walk_mode")
 	if _player:
 		_player.stop()
-	if _scene:
-		_scene.transform = Transform3D.IDENTITY
+	# The model stays where the walk left it (it used to jump back to where it started).
 	say("")
 
 
@@ -436,6 +435,16 @@ func _bake() -> bool:
 func _calibrate() -> bool:
 	_skeleton = null
 	var walk := _player.get_animation(PREFIX + "walk")
+	if walk.has_meta("mm_calibration"):
+		# The clips are in place already (walk mode ran on this file before): reuse the numbers.
+		var c: Dictionary = walk.get_meta("mm_calibration")
+		_scale = c.scale
+		_phi = c.phi
+		_hips_path = c.hips
+		_skeleton = _player.get_node(_player.root_node).get_node_or_null(
+			NodePath(_hips_path.get_slice(":", 0))
+		) as Skeleton3D
+		return _skeleton != null
 	var best := 0.0
 	for t in walk.get_track_count():
 		if walk.track_get_type(t) != Animation.TYPE_POSITION_3D:
@@ -464,8 +473,73 @@ func _calibrate() -> bool:
 	print(
 		"MOVE-CALIBRATE scale=%.4f turn=%.1f deg hips=%s" % [_scale, rad_to_deg(_phi), _hips_path]
 	)
+	if _skeleton == null:
+		_fail("the walk clip does not move a skeleton bone")
+		return false
 	_space_arms()
+	_in_place()
+	walk.set_meta("mm_calibration", {scale = _scale, phi = _phi, hips = _hips_path})
 	return true
+
+
+# Play the clips in place. Each clip's hips carry its travel and its heading (mm.elf's root: the
+# hips on the floor, facing their smoothed forward). Played as they are, a cross-fade between two
+# clips mixes two places and two headings: the body flies toward where the old clip was and swings
+# back (seen: up to 14.8 m off for 0.2 s at each switch). So take the root out of every clip, as
+# mm.elf measures it, and put the character where mm.elf says, facing its way.
+func _in_place() -> void:
+	var hips := _skeleton.find_bone(_hips_path.get_slice(":", 1))
+	var parent := _skeleton.get_bone_parent(hips)
+	var up := Transform3D.IDENTITY if parent < 0 else _skeleton.get_bone_global_rest(parent)
+	var rest_turn := _skeleton.get_bone_global_rest(hips).basis.get_rotation_quaternion()
+	var path := NodePath(_hips_path)
+	var stripped := 0
+	for anim_name in _player.get_animation_list():
+		if not anim_name.begins_with(PREFIX):
+			continue
+		var anim := _player.get_animation(anim_name)
+		var tp := anim.find_track(path, Animation.TYPE_POSITION_3D)
+		var tr := anim.find_track(path, Animation.TYPE_ROTATION_3D)
+		if tp < 0 or tr < 0:
+			continue
+		var n := anim.track_get_key_count(tp)
+		var g := []
+		var fwd := PackedVector3Array()
+		for k in n:
+			var t := anim.track_get_key_time(tp, k)
+			var local := Transform3D(
+				Basis(anim.rotation_track_interpolate(tr, t)), anim.track_get_key_value(tp, k)
+			)
+			var w := up * local
+			g.append(w)
+			# The hips' forward as mm.elf reads it: the SOMA hips +Z, so undo the rig's rest frame.
+			var f := (w.basis.get_rotation_quaternion() * rest_turn.inverse()) * Vector3.BACK
+			fwd.append(Vector3(f.x, 0, f.z))
+		# mm.elf smooths the facing over 0.25 s either side (30 fps clips: 8 keys).
+		var half := 8
+		var new_pos := []
+		var new_rot := []
+		for k in n:
+			var s := Vector3.ZERO
+			for i in range(max(0, k - half), min(n - 1, k + half) + 1):
+				s += fwd[i]
+			var yaw := atan2(s.x, s.z)
+			var w: Transform3D = g[k]
+			var root := Vector3(w.origin.x, 0, w.origin.z)
+			var undo := Basis(Vector3.UP, -yaw)
+			var placed := Transform3D(undo * w.basis, undo * (w.origin - root))
+			var local := up.affine_inverse() * placed
+			new_pos.append(local.origin)
+			new_rot.append(local.basis.get_rotation_quaternion())
+		for k in n:
+			anim.track_set_key_value(tp, k, new_pos[k])
+		# Rotation keys sit at the same frames as the position keys (one key a frame).
+		for k in anim.track_get_key_count(tr):
+			var kp := anim.track_find_key(tp, anim.track_get_key_time(tr, k), Animation.FIND_MODE_APPROX)
+			if kp >= 0:
+				anim.track_set_key_value(tr, k, new_rot[kp])
+		stripped += 1
+	print("MOVE-INPLACE clips=%d" % stripped)
 
 
 # Arm spacing. The clips are human: arms that hang close to a slim body. Copied onto a wide body
@@ -697,7 +771,9 @@ func _to_scene(n: Node3D) -> Transform3D:
 
 
 func _begin() -> void:
-	_mm.vmcall("mm_reset", 0.0, 0.0, 0.0, max(0, _keys.find("idle")))
+	# Start from where the model stands and the way it faces (a second M goes on from there).
+	var yaw := _scene.transform.basis.get_euler().y
+	_mm.vmcall("mm_reset", 0.0, 0.0, yaw, max(0, _keys.find("idle")))
 	_clip = -1
 	_mode = STAND
 	_jump_pressed = false
@@ -811,13 +887,12 @@ func _process(delta: float) -> void:
 		_clip = clip
 	elif abs(_player.current_animation_position - t) > 0.05:
 		_player.seek(t, true)
-	# Place the model so the clip's root at t lands on the character.
-	var anim := _player.get_animation(name)
-	var root_m := _root_model(anim, t)
-	var turn: float = float(r[4]) - float(r[7])
+	# Place the model: the clips play in place (hips over the skeleton's origin, facing +Z), so
+	# turn it to the character's facing and put that origin on the character.
 	var char_scene := Vector3(r[2], 0, r[3]).rotated(Vector3.UP, _phi) * _scale + _origin
-	var basis := Basis(Vector3.UP, turn)
-	_scene.transform = Transform3D(basis, char_scene - basis * root_m)
+	var basis := Basis(Vector3.UP, float(r[4]))
+	var o := basis * (_to_scene(_skeleton) * Vector3.ZERO)
+	_scene.transform = Transform3D(basis, char_scene - Vector3(o.x, 0, o.z))
 	if _trace:
 		var hb := _skeleton.find_bone(_hips_path.get_slice(":", 1))
 		var hw := (_skeleton.global_transform * _skeleton.get_bone_global_pose(hb)).origin

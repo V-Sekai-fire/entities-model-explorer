@@ -153,7 +153,6 @@ static func _validate_meta(vrm_meta: vrm_meta_class) -> PackedStringArray:
 
 func _export_meta(vrm_meta: vrm_meta_class, vrm_extension: Dictionary, gstate: GLTFState):
 	var meta_obj: Dictionary = {}
-	meta_obj["specVersion"] = vrm_meta.spec_version
 	meta_obj["name"] = vrm_meta.title
 	meta_obj["version"] = vrm_meta.version
 	meta_obj["authors"] = Array(vrm_meta.authors)
@@ -185,10 +184,15 @@ func _export_meta(vrm_meta: vrm_meta_class, vrm_extension: Dictionary, gstate: G
 	meta_obj["creditNotation"] = credit_notation_map_rev[vrm_meta.credit_notation]
 	meta_obj["allowRedistribution"] = vrm_meta.allow_redistribution == "Allow"
 	meta_obj["modification"] = modification_map_rev[vrm_meta.modification]
-	meta_obj["licenseName"] = vrm_meta.license_name
 	meta_obj["licenseUrl"] = vrm_meta.license_url
 	meta_obj["thirdPartyLicenses"] = vrm_meta.third_party_licenses
 	meta_obj["otherLicenseUrl"] = vrm_meta.other_license_url
+	# The VRM 1.0 meta schema has no specVersion or licenseName (VRM 0.x fields), gives its lists
+	# minItems 1, and leaves optional fields out when unset. VRoid Hub refuses a meta with extra
+	# keys or empty values ("model file is not included in the list").
+	for k in meta_obj.keys():
+		if (meta_obj[k] is String or meta_obj[k] is Array) and meta_obj[k].is_empty():
+			meta_obj.erase(k)
 	vrm_extension["meta"] = meta_obj
 
 

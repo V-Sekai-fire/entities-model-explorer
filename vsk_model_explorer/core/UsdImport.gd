@@ -16,6 +16,8 @@ extends Node
 #   basis (base at 0, in-betweens at their positions, the target at 1), as USD interpolates.
 # - A Z-up stage turns to Y-up and metersPerUnit scales to metres, on the single root node.
 
+signal converted(source: String, glb: String, why: String)
+
 const Bintr = preload("res://vsk_model_explorer/core/Bintr.gd")
 const ELF := "res://usd.elf"
 const CHUNK := 8 << 20  # bytes per usd_push (the 16 MiB view)
@@ -24,6 +26,18 @@ const MAX_WEIGHTS := 8
 
 var _sb: Node
 var why := ""
+
+
+# Web: converts on the next frame, from the engine's main loop rather than from inside the
+# caller (a guest script), emits `converted`, then frees itself.
+func convert_later(path: String, out: String) -> void:
+	_convert_now.call_deferred(path, out)
+
+
+func _convert_now(path: String, out: String) -> void:
+	var w := to_glb(path, out)
+	converted.emit(path, out, w)
+	queue_free()
 
 
 # Converts `path` to a GLB at `out`. Returns "" when done, else the reason.
@@ -54,7 +68,8 @@ func to_scene(path: String) -> Node3D:
 	var bytes := FileAccess.get_file_as_bytes(path)
 	if bytes.is_empty():
 		return _fail("cannot read " + path.get_file())
-	_sb = Bintr.make(self, ELF, 2048, 4096)
+	# wasm32 has one 4 GiB address space shared with the engine: a 2 GiB guest arena does not fit.
+	_sb = Bintr.make(self, ELF, 512 if OS.has_feature("web") else 2048, 4096)
 	if not _sb.has_function("usd_skeleton_info"):
 		return _close(_fail("usd.elf did not load"))
 	_sb.vmcall("usd_init")
@@ -606,7 +621,10 @@ func _fail(text: String) -> Node3D:
 
 func _close(ret):
 	if _sb:
-		_sb.vmcall("usd_close")
-		_sb.queue_free()
+		if _sb.has_function("usd_close"):
+			_sb.vmcall("usd_close")
+		# Freed now, not at the end of the frame: on the web the next guest arena needs the memory.
+		remove_child(_sb)
+		_sb.free()
 		_sb = null
 	return ret

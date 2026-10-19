@@ -2,9 +2,11 @@
 """Build Model Explorer as godot-sandbox guests: every .gd is compiled by
 V-Sekai-fire/entities-godot-sandbox-gdscript-compiler (gdscript_to_riscv) to <name>.sgd.elf with
 <name>.gd.remap pointing at it, and every .tscn becomes a build procedure (tscn2gd.py), so the
-exported game ships no GDScript and no scene files.
+exported game ships no scene files and GDScript only for PLAIN (below).
 
-    python3 guest/build.py <work dir> <gdscript_to_riscv> <godot_sandbox addon dir> <web template zip>
+    python3 guest/build.py <work dir> <gdscript_to_riscv> <godot_sandbox addon dir> <web template zip> [guest .elf ...]
+
+Each guest .elf (usd.elf, skintokens.elf) is copied to res:// for OpenUSD input and the .vrm step.
 
 Then export the work dir: godot --resolution 640x360 --path <work dir> --export-release Web out/index.html
 Prints one line per script and a summary; exit 1 if any script fails.
@@ -14,11 +16,21 @@ import json, pathlib, re, shutil, subprocess, sys, concurrent.futures
 here = pathlib.Path(__file__).resolve().parent
 src = here.parent
 work, compiler, addon, template = (pathlib.Path(x).resolve() for x in sys.argv[1:5])
+guest_elfs = [pathlib.Path(x).resolve() for x in sys.argv[5:]]
+# Scripts that run a second Sandbox (usd.elf, skintokens.elf, headfit.elf) or are called back by
+# glTF extensions while they do stay plain GDScript: a guest script that enters another guest
+# machine fails on the web ("Too many VM calls in progress", or a JSPI SuspendError).
+PLAIN_FILES = {'vsk_model_explorer/core/UsdImport.gd', 'vsk_model_explorer/core/VrmExport.gd',
+               'vsk_model_explorer/core/AutoRig.gd', 'vsk_model_explorer/core/Bintr.gd',
+               'vsk_model_explorer/core/FaceBlink.gd'}
+PLAIN_DIRS = ('addons/vrm/',)
 overlay = here / 'overlay'
 if work.exists():
     shutil.rmtree(work)
 shutil.copytree(src, work, ignore=shutil.ignore_patterns('.git', '.godot', '*.uid', 'guest', '.lake', 'lean'))
 shutil.copytree(addon, work / 'addons/godot_sandbox', dirs_exist_ok=True)
+for e in guest_elfs:
+    shutil.copy(e, work / e.name)
 if overlay:
     shutil.copytree(overlay, work, dirs_exist_ok=True)
 ep = work / 'export_presets.cfg'
@@ -123,8 +135,16 @@ def build(p):
     msg = '' if ok else ((r.stderr or r.stdout).strip().splitlines() or ['no ELF'])[0][:240]
     return rel[p], ok, elf.stat().st_size if ok else 0, msg
 
+def plain(p):
+    r = rel[p]
+    return r in PLAIN_FILES or r.startswith(PLAIN_DIRS)
+
+compiled = [p for p in files if not plain(p)]
+# The export leaves out every compiled script's source, and keeps the plain ones.
+ep.write_text(ep.read_text().replace('exclude_filter="*.gd"', 'exclude_filter="%s"' % ','.join(rel[p] for p in compiled)))
+print('PLAIN', ' '.join(sorted(rel[p] for p in files if plain(p))))
 with concurrent.futures.ThreadPoolExecutor(8) as ex:
-    rows = list(ex.map(build, files))
+    rows = list(ex.map(build, compiled))
 for name, ok, size, msg in rows:
     print(('OK  ' if ok else 'BAD ') + name, size, msg)
 good = sum(1 for r in rows if r[1])

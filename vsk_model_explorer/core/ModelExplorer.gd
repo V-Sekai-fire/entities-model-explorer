@@ -90,6 +90,7 @@ func _ready():
 	if move.available() or "--move-quit" in OS.get_cmdline_user_args():
 		add_child(move)
 		move.status = auto_rig.show_status
+		move.auto_rig = auto_rig
 		move.moves_made.connect(_load_file)
 		for row in MotionMatch.CARD_ROWS:
 			add_control_row(row)

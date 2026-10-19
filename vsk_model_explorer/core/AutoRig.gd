@@ -196,7 +196,7 @@ func download(path: String) -> void:
 
 
 # True when the GLB's JSON has a skin.
-func has_skin(path: String) -> bool:
+static func has_skin(path: String) -> bool:
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null or f.get_length() < 20 or f.get_32() != 0x46546C67:
 		return false

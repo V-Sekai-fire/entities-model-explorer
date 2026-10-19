@@ -18,6 +18,10 @@
 #   ELF      skintokens.elf
 #   USD_ELF  usd.elf (interactor-usd-guest), the OpenUSD reader for .usd, .usda, .usdc and .usdz
 #   MOTION_ELF  motion.elf (interactor-motion-guest)
+#   HEADFIT_ELF optional: headfit.elf (interactor-headfit), the anime eye closes of a rigged VRM.
+#            Unset, `pck` downloads it with gh from the newest green `guest` run of
+#            interactor-headfit's ${HEADFIT_BRANCH:-main}, and writes where it came from to
+#            <out dir>/headfit.elf.source.txt
 #   NOTICES  dir with LICENSE.md, NOTICE and CITATION.cff for the viewer, as written by
 #            tools/licences/licgen.py and published in its HF download repo
 #            (chibifire/interactor-skintokens-viewer or chibifire/interactor-kimodo-motion-viewer).
@@ -57,11 +61,25 @@ E
   cp "$ELF" "$src/skintokens.elf"
   cp "$USD_ELF" "$src/usd.elf"
   cp "$MOTION_ELF" "$src/motion.elf"
+  if [ -z "${HEADFIT_ELF:-}" ]; then
+    repo=V-Sekai-fire/interactor-headfit
+    run=$(gh run list -R "$repo" --workflow guest --branch "${HEADFIT_BRANCH:-main}" --status success \
+      --limit 1 --json databaseId --jq '.[0].databaseId')
+    [ -n "$run" ] || { echo "no green guest run on $repo ${HEADFIT_BRANCH:-main}"; exit 1; }
+    name=$(gh api "repos/$repo/actions/runs/$run/artifacts" --jq '.artifacts[] | select(.name | startswith("headfit-elf-")) | .name' | head -1)
+    rm -rf "$out/headfit-ci" && gh run download "$run" -R "$repo" -n "$name" -D "$out/headfit-ci"
+    HEADFIT_ELF="$out/headfit-ci/headfit.elf"
+    { echo "$repo run $run artifact $name"; cat "$out/headfit-ci/headfit.elf.siblings.txt"; } > "$out/headfit.elf.source.txt"
+  fi
+  # The double-precision viewer refuses a guest whose .sandbox_variant does not name a 40-byte Variant.
+  python3 -c 'import sys; b = open(sys.argv[1], "rb").read(); sys.exit(0 if b"SBXV(\0\0\0" in b and b"hf_anime_shape\0" in b else 1)' \
+    "$HEADFIT_ELF" || { echo "$HEADFIT_ELF is not a double-precision headfit.elf with hf_anime_shape"; exit 1; }
+  cp "$HEADFIT_ELF" "$src/headfit.elf"
   G="$ENGINE/godot.macos.editor.double.arm64"
   "$G" --headless --path "$src" --import > "$out/import.log" 2>&1 || true
   "$G" --headless --path "$src" --export-pack Linux "$out/skintokens-viewer.pck" > "$out/export.log" 2>&1
   if grep -q "SCRIPT ERROR" "$out/export.log"; then echo "SCRIPT ERROR in export.log"; exit 1; fi
-  for f in skintokens.elf usd.elf motion.elf godot-riscv.gdextension AutoRig.gd UsdImport.gd Motion.gd Bintr.gd clips.tsv walk.f32; do
+  for f in skintokens.elf usd.elf motion.elf headfit.elf godot-riscv.gdextension AutoRig.gd FaceBlink.gd FaceRoles.gd UsdImport.gd Motion.gd Bintr.gd clips.tsv walk.f32; do
     grep -aq "$f" "$out/skintokens-viewer.pck" || { echo "pck lacks $f"; exit 1; }
   done
   echo "PCK-OK $(wc -c < "$out/skintokens-viewer.pck") bytes"

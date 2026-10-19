@@ -22,6 +22,7 @@ const DONE := 5
 const ERROR := 6
 const UPLOAD_CHUNK := 32 << 20
 const SAVED := "Auto-rig saved "
+const WEIGHTS := ["mesh-encoder.gguf", "skin-vae.gguf", "tokenrig.gguf"]
 const SAVED_SECONDS := 10.0
 const VRM_EXTENSIONS := [
 	"res://addons/vrm/vrm_extension.gd",
@@ -89,6 +90,14 @@ func weights_dir() -> String:
 	return base.path_join("w")
 
 
+# The rig weights are in this viewer's w folder (the Kimodo motion viewer ships without them).
+func available() -> bool:
+	for f in WEIGHTS:
+		if not FileAccess.file_exists(weights_dir().path_join(f)):
+			return false
+	return true
+
+
 func show_status(text: String) -> void:
 	_label.text = text
 	_label.get_parent().visible = text != ""
@@ -115,7 +124,7 @@ func start() -> void:
 			_test_rigged = true
 			rigged.emit(posed)
 		return
-	for f in ["mesh-encoder.gguf", "skin-vae.gguf", "tokenrig.gguf"]:
+	for f in WEIGHTS:
 		if not FileAccess.file_exists(weights_dir().path_join(f)):
 			return show_status("Auto-rig needs %s in %s." % [f, weights_dir()])
 	if not ClassDB.class_exists("Sandbox"):

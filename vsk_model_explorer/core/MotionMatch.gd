@@ -23,6 +23,7 @@ signal moves_made(path: String)
 const Motion = preload("res://vsk_model_explorer/core/Motion.gd")
 const MotionMatchNode = preload("res://vsk_model_explorer/core/MotionMatchNode.gd")
 const Bintr = preload("res://vsk_model_explorer/core/Bintr.gd")
+const AutoRig = preload("res://vsk_model_explorer/core/AutoRig.gd")
 const MM_ELF := "res://mm.elf"
 const RIG_ELF := "res://skintokens.elf"
 const DIR := "res://motion/mm"
@@ -91,6 +92,9 @@ var _press_down := false
 var _press_run := false
 var _marker: MeshInstance3D
 var _last_status := ""
+# The auto-rig of the viewer. M on a model with no skin rigs it first, then walks the result.
+var auto_rig: Node
+var _walk_after_rig := false
 var _keys_testing := false
 var _space_jumps := 0
 var _trace := OS.get_environment("MOVE_TRACE") != ""
@@ -250,7 +254,11 @@ func _on_loaded(ok: bool, scene: Node) -> void:
 		printerr("MOVE-FAIL the model did not open")
 		get_tree().quit(1)
 		return
-	if _start_after_load and ok:
+	if _walk_after_rig and ok:
+		# The auto-rig result just opened: make its moves.
+		_walk_after_rig = false
+		start.call_deferred()
+	elif _start_after_load and ok:
 		# The moves file just opened.
 		_start_after_load = false
 		if _test:
@@ -278,6 +286,9 @@ func start() -> void:
 			if _test:
 				get_tree().quit(1)
 			return
+		if not AutoRig.has_skin(source):
+			await _rig_first()
+			return
 		busy = true
 		var out := await _make_moves()
 		busy = false
@@ -291,6 +302,38 @@ func start() -> void:
 	if not _bake():
 		return
 	_begin()
+
+
+# The open model has no skin, so skintokens.elf cannot put the clips on it. On the desktop with
+# the rig weights, auto-rig it; the rigged file opens and start() runs again on it.
+func _rig_first() -> void:
+	if OS.has_feature("web") or auto_rig == null or not auto_rig.available():
+		var how := (
+			"rig it with the Auto-rig button on the page"
+			if OS.has_feature("web")
+			else "the SkinTokens viewer rigs it with R"
+		)
+		_fail("the model has no rig: %s, then press M." % how)
+		if _test:
+			get_tree().quit(1)
+		return
+	say("Move: the model has no rig, so it is auto-rigged first.")
+	_walk_after_rig = true
+	busy = true
+	# The rigged file opens on a worker thread, after start() returns: watch the signal instead.
+	var got := [false]
+	var mark := func(_path: String) -> void: got[0] = true
+	auto_rig.rigged.connect(mark, CONNECT_ONE_SHOT)
+	await auto_rig.start()
+	if auto_rig.rigged.is_connected(mark):
+		auto_rig.rigged.disconnect(mark)
+	busy = false
+	if not got[0]:
+		# The auto-rig made no rigged file; its own message stays on screen.
+		_walk_after_rig = false
+		if _test:
+			printerr("MOVE-FAIL the auto-rig gave no rigged file: ", _last_status)
+			get_tree().quit(1)
 
 
 func stop() -> void:

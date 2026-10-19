@@ -859,7 +859,8 @@ func _process(delta: float) -> void:
 	var cam := get_viewport().get_camera_3d()
 	var fwd := Vector3(0, 0, -1)
 	var right := Vector3(1, 0, 0)
-	if cam and not _test:
+	# The test goes through the camera too, so it checks what a player sees.
+	if cam:
 		fwd = -cam.global_transform.basis.z
 		fwd.y = 0
 		fwd = fwd.normalized() if fwd.length() > 1e-4 else Vector3(0, 0, -1)
@@ -977,7 +978,15 @@ func _run_test() -> void:
 			if step[5] == STAND:
 				base = _run_speed if step[2] else _walk_speed
 			want = base * _scale
-		var heading: float = rad_to_deg(atan2(moved.x, -moved.z))
+		# Heading as the player sees it: 0 = away from the camera, 90 = to its right.
+		var cam := get_viewport().get_camera_3d()
+		var cf := -cam.global_transform.basis.z if cam else Vector3(0, 0, -1)
+		cf = Vector3(cf.x, 0, cf.z).normalized()
+		var cr := Vector3(-cf.z, 0, cf.x)
+		var heading: float = rad_to_deg(atan2(moved.dot(cr), moved.dot(cf)))
+		# Facing: the model's own forward (rest +Z turned by the scene) against the way it went.
+		var face := _scene.global_transform.basis * (_to_scene(_skeleton).basis * Vector3.BACK)
+		var face_off: float = rad_to_deg(Vector2(moved.x, moved.z).angle_to(Vector2(face.x, face.z))) if moved.length() > 0.01 else 0.0
 		var off: float = abs(wrapf(heading - step[4], -180.0, 180.0))
 		var share: float = kind_ok / kind_all if kind_all > 0.0 else 0.0
 		# Too fast fails too: a controller step that does not follow the frame time overshoots
@@ -985,7 +994,7 @@ func _run_test() -> void:
 		var good: bool = (
 			speed < 0.2 * _scale
 			if want == 0.0
-			else (speed > 0.6 * want and speed < 1.25 * want and off < 25.0)
+			else (speed > 0.6 * want and speed < 1.25 * want and off < 25.0 and abs(face_off) < 60.0)
 		)
 		if step[6]:
 			good = jumped and air > 0.1
@@ -993,12 +1002,13 @@ func _run_test() -> void:
 			good = good and share >= 0.7
 		print(
 			(
-				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f kind_share=%.2f air=%.2f clips=%s %s"
+				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f facing_off=%.0f kind_share=%.2f air=%.2f clips=%s %s"
 				% [
 					step[0],
 					speed,
 					want,
 					heading,
+					face_off,
 					share,
 					air,
 					",".join(seen.keys()),

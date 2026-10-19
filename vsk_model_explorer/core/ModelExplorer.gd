@@ -74,7 +74,8 @@ func _ready():
 			add_child(move)
 			move.status = auto_rig.show_status
 			move.moves_made.connect(_load_file)
-			add_control_row(["keys", ["M"], "M", "Walk with W A S D"])
+			for row in MotionMatch.CARD_ROWS:
+				add_control_row(row)
 		else:
 			move.free()
 			move = null

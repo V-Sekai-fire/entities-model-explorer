@@ -1,10 +1,14 @@
 extends Node
-# M walks the open rigged model like a character controller: W A S D move it (relative to the
-# camera), Shift runs. Motion matching picks the motion: mm.elf (interactor-motion-matching-guest,
-# a port of godot-motion-matching) holds a pose database built from Kimodo clips (SOMA skeleton,
-# res://motion/mm/), predicts where the input takes the character, and every 0.1 s picks the clip
-# frame whose next second fits best. The same clips are moved onto the model's rig once by
-# skintokens.elf ("whole": every frame, root travel kept) and played here. M again stops.
+# M walks the open rigged model like a character controller. Keyboard: W A S D move (relative to
+# the camera), Shift runs, C crouches, Z crawls (each again to stand), Space jumps, M stops.
+# Gamepad: left stick moves, right stick turns the camera, A jumps, B crouches, Y crawls, the right
+# trigger runs, Start stops. Motion matching picks the motion: mm.elf
+# (interactor-motion-matching-guest, a port of godot-motion-matching) holds a pose database built
+# from Kimodo clips and the O3DE MotionMatching gem's clips (SOMA skeleton, res://motion/mm/),
+# predicts where the input takes the character, and every 0.1 s picks the clip frame whose next
+# second fits best, among poses of the asked kind (standing, crouching or crawling; a jump picks a
+# take-off and plays through to the landing). The same clips are moved onto the model's rig once
+# by skintokens.elf ("whole": every frame, root travel kept) and played here.
 # Test mode: `-- <rigged.glb> --move-quit` opens the moves, walks forward, turns and runs,
 # checks how far and which way the model went, then quits with 0, or 1 on any failure.
 
@@ -17,6 +21,21 @@ const RIG_ELF := "res://skintokens.elf"
 const DIR := "res://motion/mm"
 const PREFIX := "mm_"
 const BLEND := 0.2
+const STAND := 0
+const CROUCH := 1
+const CRAWL := 2
+const MODE_NAMES := ["standing", "crouching", "crawling"]
+# The controls card rows this adds; the status line repeats them while walking.
+# Keyboard and gamepad on one row each.
+const CARD_ROWS := [
+	["keys", ["M"], "M or Start", "Walk mode"],
+	["keys", ["W"], "WASD or stick", "Walk"],
+	["keys", ["Shift"], "Shift or RT", "Run"],
+	["keys", ["C"], "C or pad B", "Crouch"],
+	["keys", ["Z"], "Z or pad Y", "Crawl"],
+	["keys", ["Space"], "Space or A", "Jump"],
+]
+const HELP := "W A S D walk, Shift run, C crouch, Z crawl, Space jump, M stop (gamepad: stick, RT, B, Y, A, Start)"
 
 var source := ""
 var busy := false
@@ -34,6 +53,10 @@ var _scale := 1.0
 var _phi := 0.0
 var _walk_speed := 1.3
 var _run_speed := 3.5
+var _mode_speed := [1.3, 0.8, 0.4]
+var _mode := STAND
+var _jump_pressed := false
+var _pad_prev := {}
 var _origin := Vector3.ZERO
 var _clip := -1
 var _last_world := Vector3.ZERO
@@ -41,7 +64,11 @@ var _test := false
 var _test_opened := false
 var _test_input := Vector2.ZERO
 var _test_run := false
+var _test_mode := STAND
+var _test_jump := false
 var _start_after_load := false
+var _jumping := false
+var _kind := 0
 
 
 func _ready() -> void:
@@ -65,11 +92,44 @@ func say(text: String) -> void:
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
-	if k and k.pressed and not k.echo and k.keycode == KEY_M:
-		if on:
-			stop()
-		else:
-			start()
+	if not k or not k.pressed or k.echo:
+		return
+	if k.keycode == KEY_M:
+		toggle()
+	elif on and k.keycode == KEY_C:
+		_mode = STAND if _mode == CROUCH else CROUCH
+	elif on and k.keycode == KEY_Z:
+		_mode = STAND if _mode == CRAWL else CRAWL
+	elif on and k.keycode == KEY_SPACE:
+		_jump_pressed = true
+
+
+func toggle() -> void:
+	if on:
+		stop()
+	else:
+		start()
+
+
+# Gamepad buttons on the frame they go down.
+func _pad_down(button: JoyButton) -> bool:
+	var now := Input.is_joy_button_pressed(0, button)
+	var was: bool = _pad_prev.get(button, false)
+	_pad_prev[button] = now
+	return now and not was
+
+
+func _pad() -> void:
+	if _pad_down(JOY_BUTTON_START):
+		toggle()
+	if not on:
+		return
+	if _pad_down(JOY_BUTTON_A):
+		_jump_pressed = true
+	if _pad_down(JOY_BUTTON_B):
+		_mode = STAND if _mode == CROUCH else CROUCH
+	if _pad_down(JOY_BUTTON_Y):
+		_mode = STAND if _mode == CRAWL else CRAWL
 
 
 func _on_loaded(ok: bool, scene: Node) -> void:
@@ -121,6 +181,7 @@ func stop() -> void:
 	if not on:
 		return
 	on = false
+	remove_from_group("walk_mode")
 	if _player:
 		_player.stop()
 	if _scene:
@@ -245,7 +306,26 @@ func _bake() -> bool:
 	if not tops.is_empty():
 		tops.sort()
 		_run_speed = tops[tops.size() / 2]
-	print("MOVE-SPEEDS walk=%.2f run=%.2f m/s" % [_walk_speed, _run_speed])
+	_mode_speed = [_walk_speed, 0.0, 0.0]
+	var modes := str(_mm.vmcall("mm_modes"))
+	for line in modes.split("\n", false):
+		var w := line.split(" ")
+		if w[0] == "crouch":
+			_mode_speed[CROUCH] = float(w[2])
+		elif w[0] == "crawl":
+			_mode_speed[CRAWL] = float(w[2])
+	print(
+		(
+			"MOVE-SPEEDS walk=%.2f run=%.2f crouch=%.2f crawl=%.2f m/s | %s"
+			% [
+				_walk_speed,
+				_run_speed,
+				_mode_speed[CROUCH],
+				_mode_speed[CRAWL],
+				modes.replace("\n", "; ")
+			]
+		)
+	)
 	return _calibrate()
 
 
@@ -321,16 +401,25 @@ func _to_scene(n: Node3D) -> Transform3D:
 func _begin() -> void:
 	_mm.vmcall("mm_reset", 0.0, 0.0, 0.0, max(0, _keys.find("idle")))
 	_clip = -1
+	_mode = STAND
+	_jump_pressed = false
 	_origin = _scene.position
 	on = true
+	add_to_group("walk_mode")
 	_last_world = _origin
-	say("Move: W A S D, Shift runs, M stops")
+	say(HELP)
 
 
 func _input_dir() -> Vector2:
 	if _test:
 		return _test_input
-	var v := Vector2.ZERO
+	var v := Vector2(
+		Input.get_joy_axis(0, JOY_AXIS_LEFT_X), -Input.get_joy_axis(0, JOY_AXIS_LEFT_Y)
+	)
+	if v.length() < 0.2:
+		v = Vector2.ZERO
+	elif v.length() > 1.0:
+		v = v.normalized()
 	if Input.is_key_pressed(KEY_W):
 		v.y += 1
 	if Input.is_key_pressed(KEY_S):
@@ -339,17 +428,37 @@ func _input_dir() -> Vector2:
 		v.x -= 1
 	if Input.is_key_pressed(KEY_D):
 		v.x += 1
-	return v.normalized() if v.length() > 0 else v
+	return v.normalized() if v.length() > 1.0 else v
 
 
 func _process(delta: float) -> void:
+	if not _test:
+		_pad()
 	if not on or _mm == null:
 		return
 	var dt: float = clamp(delta, 1.0 / 240.0, 1.0 / 20.0)
 	var input := _input_dir()
-	var running := _test_run if _test else Input.is_key_pressed(KEY_SHIFT)
-	# Clip speeds are SOMA metres a second; the scene is the rig's size.
-	var speed := (_run_speed if running else _walk_speed) * _scale * input.length()
+	var running := (
+		_test_run
+		if _test
+		else (
+			Input.is_key_pressed(KEY_SHIFT) or Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) > 0.5
+		)
+	)
+	if _test:
+		_mode = _test_mode
+		_jump_pressed = _jump_pressed or _test_jump
+		_test_jump = false
+	# The right stick turns the camera.
+	var cc0 := get_parent().get_node_or_null("CamController") as Node3D
+	var rx := Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
+	if cc0 and abs(rx) > 0.2 and not _test:
+		cc0.rotate_y(-rx * 2.0 * dt)
+	# Clip speeds are SOMA metres a second; the scene is the rig's size. Only standing runs.
+	var base: float = (
+		_mode_speed[_mode] if _mode != STAND else (_run_speed if running else _walk_speed)
+	)
+	var speed := base * _scale * input.length()
 	# Camera-relative input in the scene: forward is away from the camera, on the floor.
 	var cam := get_viewport().get_camera_3d()
 	var fwd := Vector3(0, 0, -1)
@@ -364,9 +473,13 @@ func _process(delta: float) -> void:
 	)
 	# Scene to SOMA: undo the rig's turn and scale.
 	var soma_v := want.rotated(Vector3.UP, -_phi) / _scale
-	var r: PackedFloat32Array = _mm.vmcall("mm_step", dt, soma_v.x, soma_v.z, NAN)
-	if r.size() < 13:
+	var jump := 1 if _jump_pressed else 0
+	_jump_pressed = false
+	var r: PackedFloat32Array = _mm.vmcall("mm_step", dt, soma_v.x, soma_v.z, NAN, _mode, jump)
+	if r.size() < 15:
 		return
+	_jumping = r[14] > 0.5
+	_kind = int(r[13])
 	var clip := int(r[0])
 	var t := float(r[1])
 	var name := PREFIX + _keys[clip]
@@ -388,7 +501,7 @@ func _process(delta: float) -> void:
 	if cc:
 		cc.position += char_scene - _last_world
 	_last_world = char_scene
-	var label := "Move %s  (W A S D, Shift runs, M stops)" % _keys[clip]
+	var label := "Walk mode, %s%s: %s" % [MODE_NAMES[_mode], ", jumping" if _jumping else "", HELP]
 	if status.is_valid():
 		status.call(label)
 
@@ -406,43 +519,82 @@ func _run_test() -> void:
 	var cc := get_parent().get_node_or_null("CamController") as Node3D
 	if shots != "" and cc:
 		# Step back so the whole model is in the pictures.
-		cc.scale *= 4.0
+		cc.scale *= 2.0
 	# [name, input, run, seconds, heading in degrees (0 = away from the camera, 90 = right)]
+	# [name, input, run, seconds, heading in degrees (0 = away from the camera, 90 = right),
+	#  mode, jump]
 	var plan := [
-		["idle", Vector2.ZERO, false, 2.0, 0.0],
-		["walk", Vector2(0, 1), false, 5.0, 0.0],
-		["turn", Vector2(1, 0), false, 4.0, 90.0],
-		["run", Vector2(1, 0), true, 4.0, 90.0],
+		["idle", Vector2.ZERO, false, 2.0, 0.0, STAND, false],
+		["walk", Vector2(0, 1), false, 5.0, 0.0, STAND, false],
+		["turn", Vector2(1, 0), false, 4.0, 90.0, STAND, false],
+		["run", Vector2(1, 0), true, 4.0, 90.0, STAND, false],
+		["jump", Vector2(1, 0), false, 3.0, 90.0, STAND, true],
+		["crouch", Vector2(0, 1), false, 5.0, 0.0, CROUCH, false],
+		["crawl", Vector2(0, 1), false, 6.0, 0.0, CRAWL, false],
+		["stand", Vector2.ZERO, false, 3.0, 0.0, STAND, false],
 	]
 	var ok := true
 	for step in plan:
 		_test_input = step[1]
 		_test_run = step[2]
+		_test_mode = step[5]
+		_test_jump = step[6]
+		if step[5] != STAND and _mode_speed[step[5]] <= 0.0:
+			print("MOVE-STEP %s SKIP no poses of that kind" % step[0])
+			continue
 		var seen := {}
 		var t := 0.0
+		var kind_ok := 0.0
+		var kind_all := 0.0
+		var air := 0.0
+		var jumped := false
 		# Judge the second half of each step: the first half is the change of direction.
 		var p0 := _last_world
 		while t < step[3]:
 			await get_tree().process_frame
-			t += get_process_delta_time()
+			var dt := get_process_delta_time()
+			t += dt
 			seen[_keys[_clip]] = true
+			jumped = jumped or _jumping
+			if _kind == 4:
+				air += dt
 			if t < step[3] * 0.5:
 				p0 = _last_world
+			else:
+				kind_all += dt
+				kind_ok += dt if _kind == step[5] else 0.0
 		var moved: Vector3 = _last_world - p0
 		var secs: float = step[3] * 0.5
 		var speed: float = Vector2(moved.x, moved.z).length() / secs
 		var want: float = 0.0
 		if step[1] != Vector2.ZERO:
-			want = (_run_speed if step[2] else _walk_speed) * _scale
+			var base: float = _mode_speed[step[5]]
+			if step[5] == STAND:
+				base = _run_speed if step[2] else _walk_speed
+			want = base * _scale
 		var heading: float = rad_to_deg(atan2(moved.x, -moved.z))
 		var off: float = abs(wrapf(heading - step[4], -180.0, 180.0))
+		var share: float = kind_ok / kind_all if kind_all > 0.0 else 0.0
 		var good: bool = (
 			speed < 0.2 * _scale if want == 0.0 else (speed > 0.6 * want and off < 25.0)
 		)
+		if step[6]:
+			good = jumped and air > 0.1
+		elif step[5] != STAND:
+			good = good and share >= 0.7
 		print(
 			(
-				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f clips=%s %s"
-				% [step[0], speed, want, heading, ",".join(seen.keys()), "ok" if good else "BAD"]
+				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f kind_share=%.2f air=%.2f clips=%s %s"
+				% [
+					step[0],
+					speed,
+					want,
+					heading,
+					share,
+					air,
+					",".join(seen.keys()),
+					"ok" if good else "BAD"
+				]
 			)
 		)
 		if shots != "":

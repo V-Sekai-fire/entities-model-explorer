@@ -23,8 +23,9 @@
 #            interactor-headfit's ${HEADFIT_BRANCH:-main}, and writes where it came from to
 #            <out dir>/headfit.elf.source.txt
 #   MM_ELF   mm.elf (interactor-motion-matching-guest), the motion-matching controller (M)
-#   MM_DATA  that repo's data/kimodo-locomotion: one dir per clip (transforms.f32, skeleton.txt,
-#            parents.txt), the controller's pose database; written into res://motion/mm/
+#   MM_DATA  that repo's clip dirs, ':'-separated (data/kimodo-locomotion:data/o3de-motionmatching):
+#            one dir per clip (transforms.f32, skeleton.txt, parents.txt), the controller's pose
+#            database; written into res://motion/mm/
 #   NOTICES  dir with LICENSE.md, NOTICE and CITATION.cff for the viewer, as written by
 #            tools/licences/licgen.py and published in its HF download repo
 #            (chibifire/interactor-skintokens-viewer or chibifire/interactor-kimodo-motion-viewer).
@@ -81,11 +82,13 @@ E
   cp "$MM_ELF" "$src/mm.elf"
   mkdir -p "$src/motion/mm"
   first=""
-  for d in "$MM_DATA"/*/; do
-    k=$(basename "$d")
-    cp "$d/transforms.f32" "$src/motion/mm/$k.f32"
-    echo "$k" >> "$src/motion/mm/clips.tsv"
-    [ -n "$first" ] || first=$d
+  for set in $(echo "$MM_DATA" | tr ':' ' '); do
+    for d in "$set"/*/; do
+      k=$(basename "$d")
+      cp "$d/transforms.f32" "$src/motion/mm/$k.f32"
+      echo "$k" >> "$src/motion/mm/clips.tsv"
+      [ -n "$first" ] || first=$d
+    done
   done
   sed -n '4,$p' "$first/skeleton.txt" > "$src/motion/mm/skeleton.txt"
   cp "$first/parents.txt" "$src/motion/mm/parents.txt"

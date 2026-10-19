@@ -14,6 +14,10 @@ const AutoRig = preload("res://vsk_model_explorer/core/AutoRig.gd")
 const UsdImport = preload("res://vsk_model_explorer/core/UsdImport.gd")
 const USD_EXTENSIONS := ["usd", "usda", "usdc", "usdz"]
 var auto_rig: Node
+const Motion = preload("res://vsk_model_explorer/core/Motion.gd")
+var motion: Node
+# The clip the motion step just added: the animation list plays it once the file reopens.
+var play_after_load := ""
 
 var gltf_doc = GLTFDocument.new()
 var gltf_vrm_extension = gltf_vrm_extension_const.new()
@@ -32,6 +36,10 @@ func _ready():
 		add_child(auto_rig)
 		auto_rig.rigged.connect(_load_file)
 		add_control_row(["keys", ["R"], "R", "Auto-rig a .glb"])
+		motion = Motion.new()
+		add_child(motion)
+		motion.status = auto_rig.show_status
+		motion.made.connect(_on_motion_made)
 	if ClassDB.get_class_list().find("FBXDocument") != -1:
 		fbx_doc = ClassDB.instantiate("FBXDocument")
 
@@ -107,6 +115,9 @@ func _load_file(file_path: String):
 			auto_rig.output_base = normalized_path.get_basename()
 		normalized_path = glb
 		ext = "glb"
+
+	if motion:
+		motion.source = normalized_path
 
 	if ext == "glb" or ext == "gltf" or ext == "vrm":
 		gltf_start_to_load.emit()
@@ -226,6 +237,11 @@ func _exit_tree():
 
 # A row on the controls card for a control that one build adds, such as the web viewer's chart.
 # Callable before _ready: a build may add its row before this node enters the tree.
+func _on_motion_made(path: String, clip: String) -> void:
+	play_after_load = clip
+	_load_file(path)
+
+
 func add_control_row(row: Array) -> void:
 	_ensure_controls_card()
 	controls_card.add_row(row)

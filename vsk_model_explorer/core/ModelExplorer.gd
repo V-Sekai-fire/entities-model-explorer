@@ -68,17 +68,6 @@ func _ready():
 		var rig_on: bool = auto_rig.available()
 		if rig_on:
 			add_control_row(["keys", ["R"], "R", "Auto-rig a .glb"])
-		# M: the open rig walks like a character controller (motion matching on mm.elf).
-		move = MotionMatch.new()
-		if move.available() or "--move-quit" in OS.get_cmdline_user_args():
-			add_child(move)
-			move.status = auto_rig.show_status
-			move.moves_made.connect(_load_file)
-			for row in MotionMatch.CARD_ROWS:
-				add_control_row(row)
-		else:
-			move.free()
-			move = null
 		motion = Motion.new()
 		var motion_on: bool = motion.available()
 		var args := OS.get_cmdline_user_args()
@@ -95,6 +84,18 @@ func _ready():
 		if "--features-quit" in args:
 			print("VIEWER-FEATURES rig=%s motion=%s" % [rig_on, motion_on])
 			get_tree().quit(0)
+	# M: the open rig walks like a character controller (motion matching on mm.elf), on the
+	# desktop and on the web.
+	move = MotionMatch.new()
+	if move.available() or "--move-quit" in OS.get_cmdline_user_args():
+		add_child(move)
+		move.status = auto_rig.show_status
+		move.moves_made.connect(_load_file)
+		for row in MotionMatch.CARD_ROWS:
+			add_control_row(row)
+	else:
+		move.free()
+		move = null
 	if ClassDB.get_class_list().find("FBXDocument") != -1:
 		fbx_doc = ClassDB.instantiate("FBXDocument")
 

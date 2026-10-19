@@ -23,6 +23,9 @@ const RIG_ELF := "res://skintokens.elf"
 const DIR := "res://motion/mm"
 const PREFIX := "mm_"
 const BLEND := 0.2
+# Arm spacing never turns an arm out more than this (degrees): clothes and bags skinned to the
+# hips (Mint's bag) would otherwise push the arms far out.
+const ARM_SPACING_MAX := 20.0
 const STAND := 0
 const CROUCH := 1
 const CRAWL := 2
@@ -642,7 +645,7 @@ func _space_arms() -> void:
 	for chain in arms:
 		var need := _clear_angle(chain, mesh)
 		var held := _idle_spread(chain, idle)
-		var turn: float = max(0.0, need - held)
+		var turn: float = clamp(need - held, 0.0, deg_to_rad(ARM_SPACING_MAX))
 		report.append(
 			(
 				"%s need=%.1f held=%.1f turn=%.1f"

@@ -9,12 +9,15 @@ extends Node
 # pose and turns each joint's +Y along its bone (skintokens.elf, no weights), as <name>.tpose.vrm.
 # An opened .usd, .usda, .usdc or .usdz file is rigged from the GLB the viewer made of it
 # (UsdImport.gd), and the result is <name>.rigged.glb beside the USD file.
+# In the browser (web build) the rig runs on the page, not here: the page opens the rigged GLB in
+# the viewer. R then saves a rigged .glb (it has a skin) as <name>.vrm when it passes the humanoid
+# gates, and a .vrm as <name>.tpose.vrm, with the same steps, and the browser downloads the file.
 # Test mode: `-- <file.glb> --auto-rig-quit` rigs the file once it is open, opens the result,
 # then quits with 0, or with 1 on any failure.
 
 signal rigged(path: String)
 
-const CardStyle = preload("res://vsk_model_explorer/core/CardStyle.gd")
+const CARD_STYLE := "res://vsk_model_explorer/core/CardStyle.gd"
 const ELF := "res://skintokens.elf"
 const VrmExport := preload("res://vsk_model_explorer/core/VrmExport.gd")
 const WAIT_GPU := 1
@@ -57,8 +60,11 @@ func _ready() -> void:
 	layer.layer = 11
 	add_child(layer)
 	var panel := PanelContainer.new()
-	panel.theme = CardStyle.make_theme()
-	panel.add_theme_stylebox_override("panel", CardStyle.card_box())
+	# Loaded, not preloaded: in the web build CardStyle is a guest script and this one is not.
+	var card_style: Script = load(CARD_STYLE)
+	if card_style and card_style.has_method("make_theme"):
+		panel.theme = card_style.call("make_theme")
+		panel.add_theme_stylebox_override("panel", card_style.call("card_box"))
 	panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	panel.position = Vector2(16, 16)
 	_label = Label.new()
@@ -123,9 +129,13 @@ func start() -> void:
 		var posed := await run_vrm(source)
 		busy = false
 		if posed != "":
+			download(posed)
 			show_saved(posed)
 			_test_rigged = true
 			rigged.emit(posed)
+		return
+	if OS.has_feature("web"):
+		await start_web()
 		return
 	for f in WEIGHTS:
 		if not FileAccess.file_exists(weights_dir().path_join(f)):
@@ -139,6 +149,59 @@ func start() -> void:
 		show_saved(out)
 		_test_rigged = true
 		rigged.emit(out)
+
+
+# Web: a rigged .glb (the page's auto-rig result) becomes <name>.vrm when it passes the humanoid
+# gates; the browser downloads it and the viewer opens it.
+func start_web() -> void:
+	if not has_skin(source):
+		return show_status(
+			"Rig the file with the Auto-rig button on the page. Then press R to save it as a .vrm file."
+		)
+	if not ClassDB.class_exists("Sandbox"):
+		return show_status("The VRM step needs the godot-sandbox library.")
+	busy = true
+	var base := source.get_basename().trim_suffix(".rigged").trim_suffix("-rigged")
+	var vrm := await rigged_to_vrm(source, base)
+	busy = false
+	if vrm == "":
+		if _label.text == "" or _label.text.begins_with("Auto-rig: "):
+			show_status(
+				"This rig does not have the shape of a person, so it is not saved as a .vrm file."
+			)
+		return
+	download(vrm)
+	show_saved(vrm.get_file())
+	_test_rigged = true
+	rigged.emit(vrm)
+
+
+# Web: the browser downloads the file (the user folder is not visible to the user).
+func download(path: String) -> void:
+	if not OS.has_feature("web"):
+		return
+	var bridge := Engine.get_singleton("JavaScriptBridge")
+	if bridge:
+		bridge.call(
+			"download_buffer",
+			FileAccess.get_file_as_bytes(path),
+			path.get_file(),
+			"model/gltf-binary"
+		)
+		print("AUTO-RIG-DOWNLOAD ", path.get_file())
+
+
+# True when the GLB's JSON has a skin.
+func has_skin(path: String) -> bool:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null or f.get_length() < 20 or f.get_32() != 0x46546C67:
+		return false
+	f.seek(12)
+	var size := f.get_32()
+	if f.get_32() != 0x4E4F534A or size > f.get_length():
+		return false
+	var root = JSON.parse_string(f.get_buffer(size).get_string_from_utf8())
+	return root is Dictionary and not root.get("skins", []).is_empty()
 
 
 # The result path stays on screen for SAVED_SECONDS, unless a newer message replaces it.
@@ -185,7 +248,8 @@ func run(mesh: String) -> String:
 
 func new_sandbox() -> void:
 	_sb = ClassDB.instantiate("Sandbox")
-	_sb.memory_max = 1024
+	# wasm32 has one 4 GiB address space shared with the engine (and a second guest).
+	_sb.memory_max = 512 if OS.has_feature("web") else 1024
 	_sb.references_max = 4096
 	_sb.allocations_max = 10000000
 	_sb.execution_timeout = 0
@@ -362,7 +426,9 @@ func cleanup() -> void:
 	_files.clear()
 	# The RenderingDevice stays for the next run: the guest's GPU buffers die with the sandbox.
 	if _sb:
-		_sb.queue_free()
+		# Freed now, not at the end of the frame: the next guest arena needs the memory (web).
+		remove_child(_sb)
+		_sb.free()
 		_sb = null
 
 

@@ -70,7 +70,9 @@ func _card_list(tree: Tree, title: String) -> void:
 
 
 func _process(_delta):
-	if Input.is_action_just_pressed("toggle_wireframe"):
+	# In walk mode (MotionMatch.gd) W walks; it does not toggle the wireframe.
+	var walking := not get_tree().get_nodes_in_group("walk_mode").is_empty()
+	if Input.is_action_just_pressed("toggle_wireframe") and not walking:
 		wireframe_on = not wireframe_on
 		_set_wireframe(wireframe_on)
 		wireframe_toggled.emit(wireframe_on)

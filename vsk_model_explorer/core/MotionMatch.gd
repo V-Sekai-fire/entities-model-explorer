@@ -10,19 +10,24 @@ extends Node
 # predicts where the input takes the character, and every 0.1 s picks the clip frame whose next
 # second fits best, among poses of the asked kind (standing, crouching or crawling; a jump picks a
 # take-off and plays through to the landing). The same clips are moved onto the model's rig once
-# by skintokens.elf ("whole": every frame, root travel kept) and played here.
+# by skintokens.elf ("whole": every frame, root travel kept) and played here by Godot's own
+# animation nodes: an AnimationTree whose root is MotionMatchNode (an AnimationNodeExtension that
+# steps mm.elf and blends the picked clips). Before that, each clip's floor travel moves from the
+# hips to a root track (the tree's root motion track, as Godot's root motion expects), and every
+# track uses Godot's makima interpolation.
 # Test mode: `-- <rigged.glb> --move-quit` opens the moves, walks forward, turns and runs,
 # checks how far and which way the model went, then quits with 0, or 1 on any failure.
 
 signal moves_made(path: String)
 
 const Motion = preload("res://vsk_model_explorer/core/Motion.gd")
+const MotionMatchNode = preload("res://vsk_model_explorer/core/MotionMatchNode.gd")
 const Bintr = preload("res://vsk_model_explorer/core/Bintr.gd")
 const MM_ELF := "res://mm.elf"
 const RIG_ELF := "res://skintokens.elf"
 const DIR := "res://motion/mm"
 const PREFIX := "mm_"
-const BLEND := 0.2
+const ROOT := "MMRoot"
 const STAND := 0
 const CROUCH := 1
 const CRAWL := 2
@@ -52,6 +57,8 @@ var _helper: Node
 var _mm: Node
 var _scene: Node3D
 var _player: AnimationPlayer
+var _tree: AnimationTree
+var _node: MotionMatchNode
 var _skeleton: Skeleton3D
 var _keys: PackedStringArray = []
 var _hips_track := -1
@@ -83,6 +90,7 @@ var _press_pos := Vector2.ZERO
 var _press_down := false
 var _press_run := false
 var _marker: MeshInstance3D
+var _last_status := ""
 
 
 func _ready() -> void:
@@ -98,6 +106,8 @@ func available() -> bool:
 
 
 func say(text: String) -> void:
+	if text != "":
+		_last_status = text
 	if status.is_valid():
 		status.call(text)
 	if _test and text.begins_with("Move failed"):
@@ -243,6 +253,7 @@ func start() -> void:
 			_start_after_load = true
 			moves_made.emit(out)
 		elif _test:
+			printerr("MOVE-FAIL making the moves: ", _last_status)
 			get_tree().quit(1)
 		return
 	if not _bake():
@@ -256,7 +267,10 @@ func stop() -> void:
 	on = false
 	_clear_target()
 	remove_from_group("walk_mode")
+	if is_instance_valid(_tree):
+		_tree.active = false
 	if _player:
+		_player.active = true
 		_player.stop()
 	if _scene:
 		_scene.transform = Transform3D.IDENTITY
@@ -400,7 +414,7 @@ func _bake() -> bool:
 			]
 		)
 	)
-	return _calibrate()
+	return _calibrate() and _prepare_clips() and _make_tree()
 
 
 # The rig's clips are the database clips moved onto the rig: the root travels the same path,
@@ -408,6 +422,20 @@ func _bake() -> bool:
 func _calibrate() -> bool:
 	_skeleton = null
 	var walk := _player.get_animation(PREFIX + "walk")
+	if walk.has_meta("mm_calibration"):
+		# The clips are already prepared: their hips no longer travel.
+		var c: Array = walk.get_meta("mm_calibration")
+		_scale = c[0]
+		_phi = c[1]
+		_hips_path = c[2]
+		_hips_track = walk.find_track(NodePath(_hips_path), Animation.TYPE_POSITION_3D)
+		_skeleton = (
+			_player.get_node(_player.root_node).get_node_or_null(
+				NodePath(_hips_path.get_slice(":", 0))
+			)
+			as Skeleton3D
+		)
+		return true
 	var best := 0.0
 	for t in walk.get_track_count():
 		if walk.track_get_type(t) != Animation.TYPE_POSITION_3D:
@@ -436,6 +464,88 @@ func _calibrate() -> bool:
 	print(
 		"MOVE-CALIBRATE scale=%.4f turn=%.1f deg hips=%s" % [_scale, rad_to_deg(_phi), _hips_path]
 	)
+	walk.set_meta("mm_calibration", [_scale, _phi, _hips_path])
+	return true
+
+
+# Godot's root motion wants the floor travel on its own track: move it from the hips to a root
+# track on the MMRoot node (the hips keep their height and sway), and use makima interpolation
+# on every track.
+func _prepare_clips() -> bool:
+	var root_owner := _player.get_node(_player.root_node)
+	if root_owner.get_node_or_null(ROOT) == null:
+		var n := Node3D.new()
+		n.name = ROOT
+		root_owner.add_child(n)
+	var to_scene := _to_scene(_skeleton) if _skeleton else Transform3D.IDENTITY
+	if _skeleton:
+		var bone := _skeleton.find_bone(_hips_path.get_slice(":", 1))
+		var parent := _skeleton.get_bone_parent(bone) if bone >= 0 else -1
+		if parent >= 0:
+			to_scene = to_scene * _skeleton.get_bone_global_rest(parent)
+	var from_scene := to_scene.affine_inverse()
+	var owner_from_scene := (
+		_to_scene(root_owner).affine_inverse() if root_owner is Node3D else Transform3D.IDENTITY
+	)
+	var interp := interpolation()
+	for k in _keys:
+		var anim := _player.get_animation(PREFIX + k)
+		if anim == null:
+			return _fail("the moves file has no clip %s" % k) != ""
+		if anim.has_meta("mm_root"):
+			continue
+		var h := anim.find_track(NodePath(_hips_path), Animation.TYPE_POSITION_3D)
+		if h < 0:
+			return _fail("clip %s has no hips track" % k) != ""
+		var rt := anim.add_track(Animation.TYPE_POSITION_3D)
+		anim.track_set_path(rt, NodePath(ROOT))
+		for i in anim.track_get_key_count(h):
+			var p := to_scene * (anim.track_get_key_value(h, i) as Vector3)
+			var ground := Vector3(p.x, 0, p.z)
+			anim.track_set_key_value(h, i, from_scene * (p - ground))
+			anim.position_track_insert_key(
+				rt, anim.track_get_key_time(h, i), owner_from_scene * ground
+			)
+		for t in anim.get_track_count():
+			match anim.track_get_type(t):
+				Animation.TYPE_POSITION_3D, Animation.TYPE_ROTATION_3D, Animation.TYPE_SCALE_3D, Animation.TYPE_BLEND_SHAPE:
+					anim.track_set_interpolation_type(t, interp)
+		anim.set_meta("mm_root", true)
+	print("MOVE-INTERP %s" % ("makima" if interp != Animation.INTERPOLATION_CUBIC else "cubic"))
+	return true
+
+
+# Godot's makima track interpolation (engines from 2026-09-29 on); cubic on an older engine.
+static func interpolation() -> Animation.InterpolationType:
+	if ClassDB.class_has_integer_constant("Animation", "INTERPOLATION_MAKIMA"):
+		return (
+			ClassDB.class_get_integer_constant("Animation", "INTERPOLATION_MAKIMA")
+			as Animation.InterpolationType
+		)
+	return Animation.INTERPOLATION_CUBIC
+
+
+# The AnimationTree: Godot plays and blends the clips; MotionMatchNode picks them.
+func _make_tree() -> bool:
+	if not is_instance_valid(_tree):
+		_tree = AnimationTree.new()
+		_tree.name = "MMTree"
+		_player.get_parent().add_child(_tree)
+		_tree.anim_player = _tree.get_path_to(_player)
+		_tree.root_node = _tree.get_path_to(_player.get_node(_player.root_node))
+		_tree.root_motion_track = NodePath(ROOT)
+		_tree.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
+	if _node == null:
+		_node = MotionMatchNode.new()
+	_node.mm = _mm
+	_node.names = PackedStringArray()
+	for k in _keys:
+		_node.names.append(PREFIX + k)
+	# AnimationNodeExtension is not a root node: it sits in a blend tree that feeds the output.
+	var blend := AnimationNodeBlendTree.new()
+	blend.add_node("motion_matching", _node)
+	blend.connect_node("output", 0, "motion_matching")
+	_tree.tree_root = blend
 	return true
 
 
@@ -474,6 +584,10 @@ func _to_scene(n: Node3D) -> Transform3D:
 
 func _begin() -> void:
 	_mm.vmcall("mm_reset", 0.0, 0.0, 0.0, max(0, _keys.find("idle")))
+	_player.stop()
+	_player.active = false
+	_node.reset()
+	_tree.active = true
 	_clip = -1
 	_mode = STAND
 	_jump_pressed = false
@@ -571,29 +685,22 @@ func _process(delta: float) -> void:
 		want = steer * speed
 	# Scene to SOMA: undo the rig's turn and scale.
 	var soma_v := want.rotated(Vector3.UP, -_phi) / _scale
-	var jump := 1 if _jump_pressed else 0
+	_node.velocity = Vector2(soma_v.x, soma_v.z)
+	_node.mode = _mode
+	_node.jump = _jump_pressed
 	_jump_pressed = false
-	var r: PackedFloat32Array = _mm.vmcall("mm_step", dt, soma_v.x, soma_v.z, NAN, _mode, jump)
+	# MotionMatchNode steps mm.elf and Godot blends the clips it picks.
+	_tree.advance(dt)
+	var r := _node.result
 	if r.size() < 15:
 		return
 	_jumping = r[14] > 0.5
 	_kind = int(r[13])
-	var clip := int(r[0])
-	var t := float(r[1])
-	var name := PREFIX + _keys[clip]
-	if clip != _clip or r[8] > 0.5:
-		_player.play(name, BLEND if _clip >= 0 else 0.0)
-		_player.seek(t, true)
-		_clip = clip
-	elif abs(_player.current_animation_position - t) > 0.05:
-		_player.seek(t, true)
-	# Place the model so the clip's root at t lands on the character.
-	var anim := _player.get_animation(name)
-	var root_m := _root_model(anim, t)
+	_clip = _node.clip
+	# The root motion track holds the floor travel, so the model's origin is the character.
 	var turn: float = float(r[4]) - float(r[7])
 	var char_scene := Vector3(r[2], 0, r[3]).rotated(Vector3.UP, _phi) * _scale + _origin
-	var basis := Basis(Vector3.UP, turn)
-	_scene.transform = Transform3D(basis, char_scene - basis * root_m)
+	_scene.transform = Transform3D(Basis(Vector3.UP, turn), char_scene)
 	# The camera follows.
 	var cc := get_parent().get_node_or_null("CamController") as Node3D
 	if cc:
@@ -602,6 +709,30 @@ func _process(delta: float) -> void:
 	var label := "Walk mode, %s%s: %s" % [MODE_NAMES[_mode], ", jumping" if _jumping else "", HELP]
 	if status.is_valid():
 		status.call(label)
+
+
+# x: the largest angle in radians between a bone's pose and the picked clip at the node's time,
+# when no cross-fade runs. y: how far the hips are from the character on the floor.
+func _pose_error() -> Vector2:
+	if not _node or _node.clip < 0 or not _skeleton:
+		return Vector2(-1, -1)
+	var hips := _skeleton.to_global(
+		_skeleton.get_bone_global_pose(_skeleton.find_bone(_hips_path.get_slice(":", 1))).origin
+	)
+	var off := Vector2(hips.x - _last_world.x, hips.z - _last_world.z).length()
+	if _node._prev >= 0:
+		return Vector2(0, off)
+	var anim := _player.get_animation(PREFIX + _keys[_node.clip])
+	var worst := 0.0
+	for t in anim.get_track_count():
+		if anim.track_get_type(t) != Animation.TYPE_ROTATION_3D:
+			continue
+		var bone := _skeleton.find_bone(str(anim.track_get_path(t)).get_slice(":", 1))
+		if bone < 0:
+			continue
+		var want := anim.rotation_track_interpolate(t, _node.time)
+		worst = max(worst, want.angle_to(_skeleton.get_bone_pose_rotation(bone)))
+	return Vector2(worst, off)
 
 
 func _run_test() -> void:
@@ -613,6 +744,11 @@ func _run_test() -> void:
 		get_tree().quit(1)
 		return
 	_begin()
+	if OS.get_environment("MOVE_PLANT") == "wrong-clip":
+		# Planted fault for the test itself: the tree plays the next clip, not the picked one.
+		var shifted := _node.names.slice(1)
+		shifted.append(_node.names[0])
+		_node.names = shifted
 	var shots := OS.get_environment("MOVE_SHOT")
 	var cc := get_parent().get_node_or_null("CamController") as Node3D
 	if shots != "" and cc:
@@ -646,6 +782,9 @@ func _run_test() -> void:
 		var kind_all := 0.0
 		var air := 0.0
 		var jumped := false
+		var pose_err := 0.0
+		var hips_off := 0.0
+		var measured := 0
 		# Judge the second half of each step: the first half is the change of direction.
 		var p0 := _last_world
 		while t < step[3]:
@@ -656,6 +795,11 @@ func _run_test() -> void:
 			jumped = jumped or _jumping
 			if _kind == 4:
 				air += dt
+			var e := _pose_error()
+			if e.x >= 0.0:
+				measured += 1
+				pose_err = max(pose_err, e.x)
+				hips_off = max(hips_off, e.y)
 			if t < step[3] * 0.5:
 				p0 = _last_world
 			else:
@@ -684,9 +828,12 @@ func _run_test() -> void:
 			good = jumped and air > 0.1
 		elif step[5] != STAND:
 			good = good and share >= 0.7
+		# The skeleton shows the picked clip (the tree plays it), and the hips stand over the
+		# character (the root motion track took the floor travel).
+		good = good and measured > 0 and pose_err < 0.02 and hips_off < 0.01 * _scale
 		print(
 			(
-				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f kind_share=%.2f air=%.2f clips=%s %s"
+				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f kind_share=%.2f air=%.2f pose_err=%.4f hips_off=%.4f clips=%s %s"
 				% [
 					step[0],
 					speed,
@@ -694,6 +841,8 @@ func _run_test() -> void:
 					heading,
 					share,
 					air,
+					pose_err,
+					hips_off,
 					",".join(seen.keys()),
 					"ok" if good else "BAD"
 				]

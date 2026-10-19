@@ -47,7 +47,8 @@ func add(path: String, force := false, names_from := "") -> String:
 		report.skipped = "not a VRM 1.0 file"
 		return ""
 	var preset: Dictionary = vrm.get("expressions", {}).get("preset", {})
-	var has := func(n: String) -> bool: return not preset.get(n, {}).get("morphTargetBinds", []).is_empty()
+	var has := func(n: String) -> bool:
+		return not preset.get(n, {}).get("morphTargetBinds", []).is_empty()
 	_keep_blink = has.call("blink") and not force
 	if has.call("blinkLeft") and has.call("blinkRight") and not force:
 		report.skipped = "the avatar has its own blinks"
@@ -144,7 +145,10 @@ func _source_names(mi: int) -> Array:
 		if key != "" and (n == key or n.ends_with("_" + key)):
 			if (_names.by_name[key] as Array).size() == mesh.primitives.size():
 				return _names.by_name[key]
-	if (_names.by_index as Array).size() == _json.meshes.size() and (_names.by_index[mi] as Array).size() == mesh.primitives.size():
+	if (
+		(_names.by_index as Array).size() == _json.meshes.size()
+		and (_names.by_index[mi] as Array).size() == mesh.primitives.size()
+	):
 		return _names.by_index[mi]
 	return []
 
@@ -243,8 +247,14 @@ func _face() -> Dictionary:
 				xyz.append_array([w.x, -w.z, w.y])
 		if ok:
 			best = {
-				"node": ni, "mesh": int(node.mesh), "accessors": accs, "roles": roles, "xyz": xyz,
-				"tri": tri, "eye": eye, "back": to_model.basis.inverse(),
+				"node": ni,
+				"mesh": int(node.mesh),
+				"accessors": accs,
+				"roles": roles,
+				"xyz": xyz,
+				"tri": tri,
+				"eye": eye,
+				"back": to_model.basis.inverse(),
 			}
 	return best
 
@@ -273,8 +283,10 @@ func _world(ni: int) -> Transform3D:
 static func _local(n: Dictionary) -> Transform3D:
 	if n.has("matrix"):
 		var m: Array = n.matrix
-		return Transform3D(Basis(Vector3(m[0], m[1], m[2]), Vector3(m[4], m[5], m[6]), Vector3(m[8], m[9], m[10])),
-			Vector3(m[12], m[13], m[14]))
+		return Transform3D(
+			Basis(Vector3(m[0], m[1], m[2]), Vector3(m[4], m[5], m[6]), Vector3(m[8], m[9], m[10])),
+			Vector3(m[12], m[13], m[14])
+		)
 	var r: Array = n.get("rotation", [0, 0, 0, 1])
 	var s: Array = n.get("scale", [1, 1, 1])
 	var p: Array = n.get("translation", [0, 0, 0])
@@ -353,7 +365,11 @@ func _view(a: int) -> Array:
 	if acc.has("sparse") or not acc.has("bufferView"):
 		return []
 	var bv: Dictionary = _json.bufferViews[int(acc.bufferView)]
-	return [int(bv.get("byteOffset", 0)) + int(acc.get("byteOffset", 0)), int(bv.get("byteStride", 0)), acc]
+	return [
+		int(bv.get("byteOffset", 0)) + int(acc.get("byteOffset", 0)),
+		int(bv.get("byteStride", 0)),
+		acc
+	]
 
 
 func _vec3(a: int) -> PackedVector3Array:
@@ -364,7 +380,9 @@ func _vec3(a: int) -> PackedVector3Array:
 	var stride: int = v[1] if v[1] > 0 else 12
 	for i in int(v[2].count):
 		var o: int = v[0] + i * stride
-		out.append(Vector3(_bin.decode_float(o), _bin.decode_float(o + 4), _bin.decode_float(o + 8)))
+		out.append(
+			Vector3(_bin.decode_float(o), _bin.decode_float(o + 4), _bin.decode_float(o + 8))
+		)
 	return out
 
 
@@ -378,7 +396,9 @@ func _ints(a: int) -> PackedInt32Array:
 	var stride: int = v[1] if v[1] > 0 else size
 	for i in int(v[2].count):
 		var o: int = v[0] + i * stride
-		out.append(_bin[o] if ct == 5121 else (_bin.decode_u16(o) if ct == 5123 else _bin.decode_u32(o)))
+		out.append(
+			_bin[o] if ct == 5121 else (_bin.decode_u16(o) if ct == 5123 else _bin.decode_u32(o))
+		)
 	return out
 
 
@@ -397,8 +417,18 @@ func _add_vec3(pts: PackedVector3Array) -> int:
 		b.encode_float(i * 12 + 8, pts[i].z)
 	_json.bufferViews.append({"buffer": 0, "byteOffset": _bin.size(), "byteLength": b.size()})
 	_bin.append_array(b)
-	_json.accessors.append({
-		"bufferView": _json.bufferViews.size() - 1, "componentType": 5126, "count": pts.size(),
-		"type": "VEC3", "min": [lo.x, lo.y, lo.z], "max": [hi.x, hi.y, hi.z],
-	})
+	(
+		_json
+		. accessors
+		. append(
+			{
+				"bufferView": _json.bufferViews.size() - 1,
+				"componentType": 5126,
+				"count": pts.size(),
+				"type": "VEC3",
+				"min": [lo.x, lo.y, lo.z],
+				"max": [hi.x, hi.y, hi.z],
+			}
+		)
+	)
 	return _json.accessors.size() - 1

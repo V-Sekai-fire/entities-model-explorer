@@ -304,9 +304,24 @@ func stop() -> void:
 	if _player:
 		_player.active = true
 		_player.stop()
-	if _scene:
-		_scene.transform = Transform3D.IDENTITY
+	if is_instance_valid(_scene):
+		if OS.get_environment("MOVE_PLANT") == "reset-on-stop":
+			# Planted fault for the test itself: the old jump back to where the walk started.
+			_scene.transform = Transform3D.IDENTITY
+		elif _skeleton:
+			_stay()
 	say("")
+
+
+# M off: the model stays where the walk left it, facing the way it faced. The pose goes back to
+# rest, so turn the scene until the rest forward points where the posed hips pointed.
+func _stay() -> void:
+	var face := _hips_forward()
+	var rest := _to_scene(_skeleton).basis * Vector3.BACK
+	var yaw := atan2(face.x, face.z) - atan2(rest.x, rest.z)
+	_scene.transform = Transform3D(
+		Basis(Vector3.UP, yaw), Vector3(_last_world.x, _origin.y, _last_world.z)
+	)
 
 
 func _has_moves() -> bool:
@@ -830,7 +845,8 @@ func _to_scene(n: Node3D) -> Transform3D:
 
 
 func _begin() -> void:
-	_mm.vmcall("mm_reset", 0.0, 0.0, 0.0, max(0, _keys.find("idle")))
+	# Start from where the model stands and the way it faces (a second M goes on from there).
+	_mm.vmcall("mm_reset", 0.0, 0.0, _scene.rotation.y, max(0, _keys.find("idle")))
 	_player.stop()
 	_player.active = false
 	_node.reset()
@@ -1162,8 +1178,45 @@ func _run_test() -> void:
 		if shots != "":
 			get_viewport().get_texture().get_image().save_png(shots + "-%s.png" % tap[0])
 		ok = ok and good
+	ok = await _test_stay() and ok
 	print("MOVE-OK" if ok else "MOVE-FAIL")
 	get_tree().quit(0 if ok else 1)
+
+
+# M off leaves the model where it stopped, facing the same way, and the next M goes on from there.
+func _test_stay() -> bool:
+	_test_input = Vector2(1, 0)
+	for i in 60:
+		await get_tree().process_frame
+	_test_input = Vector2.ZERO
+	for i in 30:
+		await get_tree().process_frame
+	var here := _last_world
+	var face := _hips_forward()
+	stop()
+	for i in 3:
+		await get_tree().process_frame
+	var rest := _scene.global_transform.basis * (_to_scene(_skeleton).basis * Vector3.BACK)
+	var moved: float = Vector2(_scene.position.x - here.x, _scene.position.z - here.z).length()
+	var turned: float = rad_to_deg(abs(Vector2(face.x, face.z).angle_to(Vector2(rest.x, rest.z))))
+	_begin()
+	for i in 30:
+		await get_tree().process_frame
+	var again: float = Vector2(_last_world.x - here.x, _last_world.z - here.z).length()
+	var face2 := _hips_forward()
+	var turned2: float = rad_to_deg(
+		abs(Vector2(face.x, face.z).angle_to(Vector2(face2.x, face2.z)))
+	)
+	var good: bool = (
+		moved < 0.05 * _scale and turned < 20.0 and again < 0.1 * _scale and turned2 < 25.0
+	)
+	print(
+		(
+			"MOVE-STEP stay off_moved=%.3f off_turned=%.0f on_moved=%.3f on_turned=%.0f %s"
+			% [moved, turned, again, turned2, "ok" if good else "BAD"]
+		)
+	)
+	return good
 
 
 # Seconds to get to a clicked point and stop there, or -1 on a failure.

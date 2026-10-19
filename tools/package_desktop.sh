@@ -18,10 +18,13 @@
 #   ELF      skintokens.elf
 #   USD_ELF  usd.elf (interactor-usd-guest), the OpenUSD reader for .usd, .usda, .usdc and .usdz
 #   MOTION_ELF  motion.elf (interactor-motion-guest)
-#   NOTICES  dir with LICENSE.md and CITATION.cff of the viewer's HF download repo
+#   NOTICES  dir with LICENSE.md, NOTICE and CITATION.cff for the viewer, as written by
+#            tools/licences/licgen.py and published in its HF download repo
 #            (chibifire/interactor-skintokens-viewer or chibifire/interactor-kimodo-motion-viewer).
-#            Each package gets both files at the top level: the MIT, BSD and Apache-2.0 parts
-#            require their notices to ship with the binaries. `package` stops if one is missing.
+#            Each package gets the three files at the top level: the MIT, BSD and Apache-2.0
+#            parts require their notices to ship with the binaries, and the NVIDIA Open Model
+#            License and the Meta Llama 3 licence require a NOTICE file. `package` stops if one
+#            is missing.
 #   BINTR    optional: dir with macos/, windows/ and linux/, each holding that OS's native
 #            translations bintr-<HASH>.dylib, .dll or .so (tools/compile_bintr.sh); a package
 #            without them runs every guest in the interpreter
@@ -75,7 +78,7 @@ esac
 for f in $weights; do
   [ -f "$w/$f" ] || { echo "missing $w/$f"; exit 1; }
 done
-for f in LICENSE.md CITATION.cff; do
+for f in LICENSE.md NOTICE CITATION.cff; do
   [ -f "${NOTICES:-}/$f" ] || { echo "missing \$NOTICES/$f (from the viewer's HF download repo)"; exit 1; }
 done
 lay() { # <os> <runtime> <exe suffix> <library>
@@ -86,7 +89,7 @@ lay() { # <os> <runtime> <exe suffix> <library>
   cp "$out/skintokens-viewer.pck" "$d/$app.pck"
   cp -R "$SANDBOX/$4" "$d/"
   cp "$ENGINE/LICENSE-model-explorer.txt" "$d/"
-  cp "$NOTICES/LICENSE.md" "$NOTICES/CITATION.cff" "$d/"
+  cp "$NOTICES/LICENSE.md" "$NOTICES/NOTICE" "$NOTICES/CITATION.cff" "$d/"
   for f in $weights; do
     mkdir -p "$d/w/$(dirname "$f")" && cp "$w/$f" "$d/w/$f"
   done

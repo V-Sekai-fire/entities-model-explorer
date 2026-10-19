@@ -9,10 +9,8 @@ const PAPER := Color(0.93, 0.93, 0.92)
 
 var hint: Label
 var cam_rig: Node3D
-var charts: Node3D
 var chart_cam: Camera3D
 var key_light: DirectionalLight3D
-var model_box := AABB(Vector3(-0.5, 0, -0.5), Vector3(1, 1, 1))
 
 
 func _ready() -> void:
@@ -41,8 +39,6 @@ func _ready() -> void:
 	key_light = cam.get_node("DirectionalLight3D")
 	key_light.light_energy = 0.73
 	root.add_child(_backdrop())
-	charts = _color_charts()
-	root.add_child(charts)
 	chart_cam = cam
 	# UIController's Grid export is never set in ModelExplorer.tscn, so Hide Grid did nothing.
 	root.get_node("Node").set("Grid", root.get_node("GizmoPlane"))
@@ -65,8 +61,6 @@ func _ready() -> void:
 	# Bottom left, clear of the information panel (300 px) and of the controls card on the right.
 	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, 20)
 	hint.position.x = 320
-	# The app draws the controls card; the colour chart is this build's own control.
-	root.call("add_control_row", ["keys", ["C"], "C", "Colour chart"])
 	root.gltf_is_loaded.connect(_on_loaded)
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -74,148 +68,10 @@ func _ready() -> void:
 	print("BOOT built ", root.name, " sample=", SAMPLE)
 
 
-# X-Rite ColorChecker Classic, sRGB 8-bit (D65), row by row from dark skin to black.
-const CHECKER := [
-	[115, 82, 68],
-	[194, 150, 130],
-	[98, 122, 157],
-	[87, 108, 67],
-	[133, 128, 177],
-	[103, 189, 170],
-	[214, 126, 44],
-	[80, 91, 166],
-	[193, 90, 99],
-	[94, 60, 108],
-	[157, 188, 64],
-	[224, 163, 46],
-	[56, 61, 150],
-	[70, 148, 73],
-	[175, 54, 60],
-	[231, 199, 31],
-	[187, 86, 149],
-	[8, 133, 161],
-	[243, 243, 242],
-	[200, 200, 200],
-	[160, 160, 160],
-	[122, 122, 121],
-	[85, 85, 85],
-	[52, 52, 52],
-]
-const CHART_W := 0.16
-const CHART_H := 0.107
-
-
-# Two charts on one board standing beside the model: the top one is lit like the model (it shows what the
-# lights and ambient do), the bottom one is unshaded (it shows only the output transform:
-# tonemapper, sRGB encode, canvas). C shows or hides them. Patch centres are printed as
-# "CHART <lit|flat> <index> <x> <y>" so a test can read the screen at those pixels.
-func _color_charts() -> Node3D:
-	var img := Image.create(6 * 16, 4 * 16, false, Image.FORMAT_RGB8)
-	for i in CHECKER.size():
-		var c: Array = CHECKER[i]
-		img.fill_rect(Rect2i((i % 6) * 16 + 1, (i / 6) * 16 + 1, 14, 14), Color8(c[0], c[1], c[2]))
-	var tex := ImageTexture.create_from_image(img)
-	var holder := Node3D.new()
-	holder.name = "ColorCharts"
-	var board := MeshInstance3D.new()
-	board.name = "board"
-	var bm := BoxMesh.new()
-	bm.size = Vector3(CHART_W * 1.12, CHART_H * 2.24, CHART_W * 0.04)
-	board.mesh = bm
-	var bmat := StandardMaterial3D.new()
-	bmat.albedo_color = Color(0.1, 0.1, 0.1)
-	bmat.roughness = 1.0
-	board.material_override = bmat
-	board.position = Vector3(0, 0, -CHART_W * 0.021)
-	holder.add_child(board)
-	for lit in [true, false]:
-		var mat := StandardMaterial3D.new()
-		mat.albedo_texture = tex
-		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-		mat.roughness = 1.0
-		mat.metallic_specular = 0.0
-		if not lit:
-			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		var quad := QuadMesh.new()
-		quad.size = Vector2(CHART_W, CHART_H)
-		var mi := MeshInstance3D.new()
-		mi.name = "lit" if lit else "flat"
-		mi.mesh = quad
-		mi.material_override = mat
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		# Stacked: lit on top, unshaded below.
-		mi.position = Vector3(0.0, CHART_H * 0.56 if lit else -CHART_H * 0.56, 0.0)
-		holder.add_child(mi)
-	return holder
-
-
 func _print_chart_points() -> void:
-	for mi in charts.get_children():
-		var m := mi as MeshInstance3D
-		if m.name == "board":
-			continue
-		for i in CHECKER.size():
-			var local := Vector3(
-				(float(i % 6) + 0.5) / 6.0 * CHART_W - CHART_W * 0.5,
-				CHART_H * 0.5 - (float(i / 6) + 0.5) / 4.0 * CHART_H,
-				0.0
-			)
-			var sp := chart_cam.unproject_position(m.global_transform * local)
-			print("CHART %s %d %d %d" % [m.name, i, int(sp.x), int(sp.y)])
-
-
-func _measure_model() -> void:
-	var box := AABB()
-	var first := true
-	for model in get_tree().get_nodes_in_group("gltf group"):
-		for m in model.find_children("*", "MeshInstance3D", true, false):
-			var mi := m as MeshInstance3D
-			if mi.mesh == null or mi.is_in_group("vsk_web_wire"):
-				continue
-			var b := mi.global_transform * mi.get_aabb()
-			box = b if first else box.merge(b)
-			first = false
-	if not first:
-		model_box = box
-	_place_charts()
-
-
-# The charts are a physical board in the world, standing on the floor to the model's right (+X)
-# and staying put when the camera orbits, like a real ColorChecker propped up beside a subject in
-# a photo. Laid flat, the camera saw the patches edge-on (about 12 degrees) and the key light hit
-# them at a slant, so the board is tilted: its face points halfway between the camera and the key
-# light (the light rides on the camera), which gives every patch the same light and a full view.
-func _place_charts() -> void:
-	var h := maxf(model_box.size.y, 0.001)
-	var k := 0.5 * h / (2.2 * CHART_H)
-	var floor_y := model_box.position.y
-	var at := Vector3(
-		model_box.end.x + 0.08 * h + 0.6 * CHART_W * k,
-		floor_y + 1.12 * CHART_H * k,
-		model_box.get_center().z
-	)
-	var to_cam := (chart_cam.global_position - at).normalized()
-	var to_light := key_light.global_basis.z.normalized()
-	var face := (to_cam + to_light).normalized()
-	var b := Basis.looking_at(-face, Vector3.UP).scaled(Vector3(k, k, k))
-	# Stand the board's lowest corner on the floor.
-	var half := Vector3(CHART_W * 0.56, CHART_H * 1.12, CHART_W * 0.02)
-	var low := (b * Vector3(0, 0, -CHART_W * 0.021)).y
-	low -= absf(b.x.y) * half.x + absf(b.y.y) * half.y + absf(b.z.y) * half.z
-	at.y = floor_y - low
-	charts.transform = Transform3D(b, at)
-	print(
-		(
-			"CHART face %.3f %.3f %.3f cam %.3f light %.3f"
-			% [face.x, face.y, face.z, face.dot(to_cam), face.dot(to_light)]
-		)
-	)
-
-
-func _unhandled_key_input(event: InputEvent) -> void:
-	var k := event as InputEventKey
-	if k and k.pressed and not k.echo and k.keycode == KEY_C:
-		charts.visible = not charts.visible
+	var chart: Node3D = get_tree().root.find_child("ColorCharts", true, false)
+	if chart:
+		chart.print_points(chart_cam)
 
 
 var loads := 0
@@ -347,8 +203,7 @@ func _on_loaded(ok: bool, _scene) -> void:
 	# The camera starts level with the floor grid, which then shows edge-on as nothing; look down a
 	# little so the grid is visible. Deferred: CamController resets the pitch on the same signal.
 	cam_rig.set_deferred("rotation", Vector3(deg_to_rad(-12.0), 0.0, 0.0))
-	# After the pitch (deferred calls run in order): the board faces the camera's start position.
-	_measure_model.call_deferred()
+	# The app places the colour chart; print its patch centres for screen tests.
 	get_tree().create_timer(1.0).timeout.connect(_print_chart_points)
 	if loads > 1:
 		hint.text = "Drop another .glb, .gltf or .vrm to replace it."

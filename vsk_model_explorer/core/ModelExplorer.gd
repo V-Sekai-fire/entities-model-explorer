@@ -16,6 +16,8 @@ const UsdImport = preload("res://vsk_model_explorer/core/UsdImport.gd")
 const USD_EXTENSIONS := ["usd", "usda", "usdc", "usdz"]
 var auto_rig: Node
 const Motion = preload("res://vsk_model_explorer/core/Motion.gd")
+const ColorChart = preload("res://vsk_model_explorer/core/ColorChart.gd")
+var color_chart: Node3D
 var motion: Node
 const Flex = preload("res://vsk_model_explorer/core/Flex.gd")
 var flex: Node
@@ -43,6 +45,12 @@ func _ready():
 	flex = Flex.new()
 	add_child(flex)
 	add_control_row(["keys", ["F"], "F", "Flex 20 min"])
+	# The colour chart beside the model: hidden at start, C shows or hides it.
+	color_chart = ColorChart.new()
+	add_child(color_chart)
+	add_control_row(["keys", ["C"], "C", "Colour chart"])
+	gltf_is_loaded.connect(_place_color_chart.unbind(2))
+	fbx_is_loaded.connect(_place_color_chart.unbind(2))
 	if OS.has_feature("web"):
 		# The page rigs the model; here R saves a rigged .glb or a .vrm as a VRM 1.0 file.
 		auto_rig = AutoRig.new()
@@ -114,6 +122,14 @@ func _check_command_line_args():
 			if ext in ["glb", "gltf", "vrm", "fbx"] or ext in USD_EXTENSIONS:
 				_load_file(file_path)
 				break
+
+
+func _place_color_chart() -> void:
+	# A frame later: the model's transforms settle after the load signal.
+	await get_tree().process_frame
+	var models: Array = get_tree().get_nodes_in_group("gltf group")
+	models.append_array(get_tree().get_nodes_in_group("fbx group"))
+	color_chart.place(ColorChart.model_box_of(models))
 
 
 func _on_file_dropped(files: PackedStringArray):

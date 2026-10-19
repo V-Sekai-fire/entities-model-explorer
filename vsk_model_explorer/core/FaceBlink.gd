@@ -1,7 +1,9 @@
-# Gives a VRM 1.0 file without one-eye blinks the anime eye closes of headfit.elf (RFD 2275's
-# anime style, procedural:anime_eye_close_plain_left/right): two morph targets, EyeClosedLeft and
-# EyeClosedRight, on the face mesh, bound to the blinkLeft and blinkRight expressions, and to blink
-# too when the avatar has no blink of its own (an own both-eyes blink is kept).
+# Gives a VRM 1.0 file the anime eye closes of headfit.elf (RFD 2275's anime style) that it lacks:
+# - without one-eye blinks: EyeClosedLeft and EyeClosedRight (procedural:anime_eye_close_plain_*)
+#   on the face mesh, bound to blinkLeft and blinkRight, and to blink too when the avatar has no
+#   blink of its own (an own both-eyes blink is kept);
+# - without a happy expression: EyeClosedSmileLeft and EyeClosedSmileRight (the smile close, ^^,
+#   procedural:anime_eye_close_smile_*), bound to happy with overrideBlink "block".
 # The file is edited at the glTF level: the binary chunk only grows, and the JSON is written back
 # whole (numbers at Godot's 15 significant digits).
 #
@@ -13,9 +15,16 @@ extends RefCounted
 
 const FaceRoles := preload("res://vsk_model_explorer/core/FaceRoles.gd")
 const ELF := "res://headfit.elf"
-const KINDS := ["anime_eye_close_plain_left", "anime_eye_close_plain_right"]
-const NAMES := ["EyeClosedLeft", "EyeClosedRight"]
-const PRESETS := ["blinkLeft", "blinkRight"]
+# kind -> [morph target, expression]: the plain closes are the one-eye blinks; the smile closes
+# (^^, both lids meet) are the eyes of the happy expression.
+const PLAIN := [
+	["anime_eye_close_plain_left", "EyeClosedLeft", "blinkLeft"],
+	["anime_eye_close_plain_right", "EyeClosedRight", "blinkRight"],
+]
+const SMILE := [
+	["anime_eye_close_smile_left", "EyeClosedSmileLeft", "happy"],
+	["anime_eye_close_smile_right", "EyeClosedSmileRight", "happy"],
+]
 
 # What the last add() did, for the log: {face, vertices, moved_left, moved_right} or {skipped}.
 var report := {}
@@ -23,6 +32,7 @@ var _json: Dictionary
 var _bin: PackedByteArray
 var _names := {}  # the material names of names_from (_primitive_names)
 var _keep_blink := false  # the avatar's own both-eyes blink stays; only the one-eye closes are added
+var _kinds := []  # the rows of PLAIN and SMILE this file gets
 
 
 # Adds the closes to the VRM 1.0 file at `path` in place. force = also when the file has its own
@@ -50,8 +60,13 @@ func add(path: String, force := false, names_from := "") -> String:
 	var has := func(n: String) -> bool:
 		return not preset.get(n, {}).get("morphTargetBinds", []).is_empty()
 	_keep_blink = has.call("blink") and not force
-	if has.call("blinkLeft") and has.call("blinkRight") and not force:
-		report.skipped = "the avatar has its own blinks"
+	_kinds = []
+	if force or not (has.call("blinkLeft") and has.call("blinkRight")):
+		_kinds.append_array(PLAIN)
+	if force or not has.call("happy"):
+		_kinds.append_array(SMILE)
+	if _kinds.is_empty():
+		report.skipped = "the avatar has its own blinks and happy expression"
 		return ""
 	var face := _face()
 	if face.is_empty():
@@ -307,10 +322,16 @@ func _generate(sb: Node, face: Dictionary) -> String:
 		names.append("target%d" % names.size())
 	var preset: Dictionary = _json.extensions.VRMC_vrm.get("expressions", {}).get("preset", {})
 	var both := []
+	var happy := []
 	report = {"face": str(m.get("name", face.mesh)), "vertices": face.xyz.size() / 3}
-	for k in KINDS.size():
-		var d: PackedFloat32Array = sb.vmcall("hf_anime_shape", mesh, KINDS[k])
+	var added := 0
+	for k in _kinds.size():
+		var d: PackedFloat32Array = sb.vmcall("hf_anime_shape", mesh, _kinds[k][0])
 		if d.size() != face.xyz.size():
+			if _kinds[k][2] == "happy":
+				# An older headfit.elf has no smile close: the blinks still go in.
+				report.happy = "skipped: " + str(sb.vmcall("hf_error"))
+				continue
 			return "headfit.elf: " + str(sb.vmcall("hf_error"))
 		# Back to glTF: (dx, dy, dz) fit -> (dx, dz, -dy).
 		var moved := 0
@@ -330,16 +351,27 @@ func _generate(sb: Node, face: Dictionary) -> String:
 			if not prim.has("targets"):
 				prim.targets = []
 			prim.targets.append({"POSITION": made[int(prim.attributes.POSITION)]})
-		names.append(NAMES[k])
+		names.append(_kinds[k][1])
 		if m.has("weights"):
 			m.weights.append(0.0)
-		var bind := {"node": face.node, "index": ntargets + k, "weight": 1.0}
-		both.append(bind)
-		preset[PRESETS[k]] = _expression([bind])
-		report["moved_" + ["left", "right"][k]] = moved
-	if not _keep_blink:
-		preset.blink = _expression(both)
-	report.blink = "own" if _keep_blink else "generated"
+		var bind := {"node": face.node, "index": ntargets + added, "weight": 1.0}
+		added += 1
+		if _kinds[k][2] == "happy":
+			happy.append(bind)
+		else:
+			both.append(bind)
+			preset[_kinds[k][2]] = _expression([bind])
+		report["moved_" + _kinds[k][1]] = moved
+	if not both.is_empty():
+		if not _keep_blink:
+			preset.blink = _expression(both)
+		report.blink = "own" if _keep_blink else "generated"
+	if not happy.is_empty():
+		# The smile eyes stand in for the blink while happy shows: VRM 1.0's overrideBlink "block".
+		var e := _expression(happy)
+		e.overrideBlink = "block"
+		preset.happy = e
+		report.happy = "generated eyes"
 	if not m.has("extras"):
 		m.extras = {}
 	m.extras.targetNames = names

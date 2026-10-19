@@ -24,8 +24,9 @@ const DIR := "res://motion/mm"
 const PREFIX := "mm_"
 const BLEND := 0.2
 # Arm spacing never turns an arm out more than this (degrees): clothes and bags skinned to the
-# hips (Mint's bag) would otherwise push the arms far out.
-const ARM_SPACING_MAX := 20.0
+# hips (Mint's bag) would otherwise push the arms far out (Mint asked for 58 degrees; 15 keeps
+# SK_CharacterMedium's 12 and 15 whole).
+const ARM_SPACING_MAX := 15.0
 const STAND := 0
 const CROUCH := 1
 const CRAWL := 2

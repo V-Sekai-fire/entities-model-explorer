@@ -91,7 +91,9 @@ var _press_down := false
 var _press_run := false
 var _marker: MeshInstance3D
 var _last_status := ""
-var _last_walk_key := KEY_NONE
+var _keys_testing := false
+var _space_jumps := 0
+var _trace := OS.get_environment("MOVE_TRACE") != ""
 
 
 func _ready() -> void:
@@ -115,36 +117,43 @@ func say(text: String) -> void:
 		printerr("MOVE-FAIL ", text)
 
 
-# In walk mode these keys belong to walk mode: _input takes them before the buttons and every
-# other key (C colour chart, W wireframe, Space on a focused button) sees them.
-const WALK_KEYS := [KEY_W, KEY_A, KEY_S, KEY_D, KEY_SHIFT, KEY_C, KEY_Z, KEY_SPACE, KEY_M]
+# The walk keys. In walk mode they belong to the walk: no other part of the viewer gets them.
+const WALK_KEYS := [KEY_W, KEY_A, KEY_S, KEY_D, KEY_SHIFT, KEY_C, KEY_Z, KEY_SPACE]
 
 
+# _input runs before the GUI and before _unhandled_key_input, so a focused button or list does
+# not take Space or a letter, and C does not also open the colour chart.
 func _input(event: InputEvent) -> void:
+	if on and event is InputEventJoypadButton:
+		# The pad is read by polling; a focused button must not take A as "press".
+		get_viewport().set_input_as_handled()
+		return
 	var k := event as InputEventKey
-	if not on or not k or not k.keycode in WALK_KEYS:
+	if not k:
+		return
+	if k.keycode == KEY_M and not _typing():
+		get_viewport().set_input_as_handled()
+		if k.pressed and not k.echo:
+			toggle()
+		return
+	if not on or not k.keycode in WALK_KEYS:
 		return
 	get_viewport().set_input_as_handled()
-	if k.pressed and not k.echo:
-		_walk_key(k.keycode)
-
-
-func _unhandled_key_input(event: InputEvent) -> void:
-	var k := event as InputEventKey
-	if k and k.pressed and not k.echo and k.keycode == KEY_M:
-		toggle()
-
-
-func _walk_key(key: Key) -> void:
-	_last_walk_key = key
-	if key == KEY_M:
-		toggle()
-	elif key == KEY_C:
+	if not k.pressed or k.echo:
+		return
+	if k.keycode == KEY_C:
 		_mode = STAND if _mode == CROUCH else CROUCH
-	elif key == KEY_Z:
+	elif k.keycode == KEY_Z:
 		_mode = STAND if _mode == CRAWL else CRAWL
-	elif key == KEY_SPACE:
+	elif k.keycode == KEY_SPACE:
 		_jump_pressed = true
+		_space_jumps += 1
+
+
+# A text box has the keyboard: M is a letter there, not walk mode.
+func _typing() -> bool:
+	var f := get_viewport().gui_get_focus_owner()
+	return f is LineEdit or f is TextEdit
 
 
 # A click or tap on the floor (mouse, or touch through Godot's mouse emulation) sets the point.
@@ -378,35 +387,6 @@ func _make_moves() -> String:
 	return out
 
 
-# In walk mode C crouches and does not show the colour chart.
-func _keys_go_to_walk_mode() -> bool:
-	var chart = get_parent().get("color_chart")
-	var shown: bool = chart.visible if chart else false
-	for pressed in [true, false]:
-		var k := InputEventKey.new()
-		k.keycode = KEY_C
-		k.physical_keycode = KEY_C
-		k.pressed = pressed
-		Input.parse_input_event(k)
-	# Parsed events reach the viewport when Input flushes them, a frame or two later.
-	for i in 3:
-		await get_tree().process_frame
-	var ok: bool = _last_walk_key == KEY_C and (chart == null or chart.visible == shown)
-	_mode = STAND
-	if ok:
-		print(
-			"MOVE-KEYS ok: C crouches, the colour chart stays %s" % ("shown" if shown else "hidden")
-		)
-	else:
-		printerr(
-			(
-				"MOVE-FAIL walk keys: C went to walk mode %s, colour chart %s -> %s"
-				% [_last_walk_key == KEY_C, shown, chart.visible if chart else shown]
-			)
-		)
-	return ok
-
-
 func _fail(why: String) -> String:
 	busy = false
 	say("Move failed: " + why)
@@ -516,6 +496,7 @@ func _calibrate() -> bool:
 	print(
 		"MOVE-CALIBRATE scale=%.4f turn=%.1f deg hips=%s" % [_scale, rad_to_deg(_phi), _hips_path]
 	)
+	_space_arms()
 	walk.set_meta("mm_calibration", [_scale, _phi, _hips_path])
 	return true
 
@@ -599,6 +580,201 @@ func _make_tree() -> bool:
 	blend.connect_node("output", 0, "motion_matching")
 	_tree.tree_root = blend
 	return true
+
+
+# Arm spacing. The clips are human: arms that hang close to a slim body. Copied onto a wide body
+# (a big belly, wide hips, short arms) the same angles put the forearms and hands inside it. For
+# each arm, find how far from straight down the arm must hang to clear the body at rest (mesh),
+# take away how far the clips' idle already holds it out, and turn the upper arm out by the rest in
+# every mm_ clip, about the body's forward axis (Mixamo's "arm spacing").
+func _space_arms() -> void:
+	if _skeleton == null or not _player.has_animation(PREFIX + "idle"):
+		return
+	var idle := _player.get_animation(PREFIX + "idle")
+	if idle.has_meta("arm_spacing"):
+		return
+	var arms := _arm_chains()
+	if arms.size() != 2:
+		print("MOVE-ARMS none (no two arm chains)")
+		return
+	var mesh := _rest_mesh()
+	var report := []
+	for chain in arms:
+		var need := _clear_angle(chain, mesh)
+		var held := _idle_spread(chain, idle)
+		var turn: float = max(0.0, need - held)
+		report.append("%s need=%.1f held=%.1f turn=%.1f" % [
+			_skeleton.get_bone_name(chain[1]), rad_to_deg(need), rad_to_deg(held), rad_to_deg(turn)])
+		if turn > 0.0:
+			_turn_arm(chain, turn)
+	idle.set_meta("arm_spacing", true)
+	print("MOVE-ARMS ", "; ".join(report))
+
+
+# [shoulder, upper arm, forearm, hand, ... tip] for each arm: the chains from the bone with the
+# most children above the hips (the chest) that end farthest to the side.
+func _arm_chains() -> Array:
+	var n := _skeleton.get_bone_count()
+	var hips := _skeleton.find_bone(_hips_path.get_slice(":", 1))
+	var chest := -1
+	for b in n:
+		if _skeleton.get_bone_children(b).size() >= 3 and b != hips:
+			if chest < 0 or _rest(b).origin.y > _rest(chest).origin.y:
+				chest = b
+	if chest < 0:
+		return []
+	var out := []
+	for c in _skeleton.get_bone_children(chest):
+		var chain := [c]
+		while _skeleton.get_bone_children(chain[-1]).size() > 0:
+			var best := -1
+			for k in _skeleton.get_bone_children(chain[-1]):
+				if best < 0 or _side(k) > _side(best):
+					best = k
+			chain.append(best)
+		if chain.size() >= 4 and _side(chain[-1]) > 2.0 * _side(c):
+			out.append(chain)
+	if out.size() > 2:
+		out.sort_custom(func(a, b): return _side(a[-1]) > _side(b[-1]))
+		out = out.slice(0, 2)
+	return out
+
+
+func _rest(b: int) -> Transform3D:
+	return _to_scene(_skeleton) * _skeleton.get_bone_global_rest(b)
+
+
+# How far a bone sits to the side of the hips, in the floor plane.
+func _side(b: int) -> float:
+	var hips := _skeleton.find_bone(_hips_path.get_slice(":", 1))
+	var d := _rest(b).origin - _rest(hips).origin
+	return Vector2(d.x, d.z).length()
+
+
+# Rest mesh in scene space: positions and each vertex's heaviest bone.
+func _rest_mesh() -> Dictionary:
+	var pos := PackedVector3Array()
+	var bone := PackedInt32Array()
+	for mi in _scene.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		if m.mesh == null or m.skin == null:
+			continue
+		var xf := _to_scene(m)
+		for s in m.mesh.get_surface_count():
+			var a := m.mesh.surface_get_arrays(s)
+			var v: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			var bi = a[Mesh.ARRAY_BONES]
+			var bw = a[Mesh.ARRAY_WEIGHTS]
+			if bi == null or bw == null or v.is_empty():
+				continue
+			var per := int(bi.size() / v.size())
+			for i in v.size():
+				var top := 0
+				for k in per:
+					if bw[i * per + k] > bw[i * per + top]:
+						top = k
+				var bind := int(bi[i * per + top])
+				var sb := m.skin.get_bind_bone(bind)
+				if sb < 0:
+					sb = _skeleton.find_bone(m.skin.get_bind_name(bind))
+				pos.append(xf * v[i])
+				bone.append(sb)
+	return {pos = pos, bone = bone}
+
+
+func _axis(chain: Array) -> Vector3:
+	var hips := _skeleton.find_bone(_hips_path.get_slice(":", 1))
+	var side := _rest(chain[1]).origin - _rest(hips).origin
+	side.y = 0
+	return Vector3.DOWN.cross(side.normalized()).normalized()
+
+
+# Smallest angle out from straight down at which the whole arm (shoulder joint to tip, as a
+# segment as thick as the arm) misses every body vertex below the shoulder.
+func _clear_angle(chain: Array, mesh: Dictionary) -> float:
+	var arm := {}
+	for b in chain.slice(1):
+		arm[b] = true
+	var s := _rest(chain[1]).origin
+	var length := 0.0
+	for i in range(1, chain.size() - 1):
+		length += _rest(chain[i]).origin.distance_to(_rest(chain[i + 1]).origin)
+	# Arm thickness: median distance of upper arm and forearm vertices from their bones.
+	var radii := []
+	var body := PackedVector3Array()
+	var p: PackedVector3Array = mesh.pos
+	var bo: PackedInt32Array = mesh.bone
+	for i in p.size():
+		var b := bo[i]
+		if b == chain[1] or b == chain[2]:
+			var a := _rest(b).origin
+			var e := _rest(chain[chain.find(b) + 1]).origin
+			radii.append(Geometry3D.get_closest_point_to_segment(p[i], a, e).distance_to(p[i]))
+		elif not arm.has(b) and b != chain[0] and p[i].y < s.y - 0.1 * length:
+			body.append(p[i])
+	if radii.is_empty() or body.is_empty():
+		return 0.0
+	radii.sort()
+	var r: float = radii[radii.size() / 2]
+	# A few thousand body points are enough to find the gap, and keep this quick on big meshes.
+	if body.size() > 4000:
+		var few := PackedVector3Array()
+		var step := body.size() / 4000.0
+		for i in 4000:
+			few.append(body[int(i * step)])
+		body = few
+	var ax := _axis(chain)
+	for deg in range(0, 61):
+		var tip := s + Vector3.DOWN.rotated(ax, deg_to_rad(deg)) * length
+		var clear := INF
+		for q in body:
+			clear = min(clear, Geometry3D.get_closest_point_to_segment(q, s, tip).distance_to(q))
+		if clear >= r:
+			return deg_to_rad(deg)
+	return deg_to_rad(60.0)
+
+
+# How far out from straight down the idle clip holds the arm (shoulder joint to wrist), median.
+func _idle_spread(chain: Array, idle: Animation) -> float:
+	var vals := []
+	var ax := _axis(chain)
+	var steps := 20
+	for i in steps:
+		var t := idle.length * float(i) / steps
+		var g := {}
+		var place := func(b: int) -> Transform3D:
+			var local := _skeleton.get_bone_rest(b)
+			var tr := idle.find_track(NodePath("%s:%s" % [_hips_path.get_slice(":", 0), _skeleton.get_bone_name(b)]), Animation.TYPE_ROTATION_3D)
+			if tr >= 0:
+				local.basis = Basis(idle.rotation_track_interpolate(tr, t)).scaled(local.basis.get_scale())
+			return local
+		# Pose relative to the chest at rest, so only the arm's own angles count.
+		var xf := _rest(_skeleton.get_bone_parent(chain[0]))
+		for b in chain.slice(0, 4):
+			xf = xf * place.call(b)
+			g[b] = xf.origin
+		var d: Vector3 = g[chain[3]] - g[chain[1]]
+		# Angle out from straight down within the plane across the body.
+		var side := ax.cross(Vector3.DOWN)
+		vals.append(atan2(d.dot(side), -d.y))
+	vals.sort()
+	return max(0.0, vals[vals.size() / 2])
+
+
+func _turn_arm(chain: Array, angle: float) -> void:
+	var parent_rest := _rest(chain[0]).basis.get_rotation_quaternion()
+	var spin := Quaternion(parent_rest.inverse() * _axis(chain), angle)
+	var path := NodePath("%s:%s" % [_hips_path.get_slice(":", 0), _skeleton.get_bone_name(chain[1])])
+	for anim_name in _player.get_animation_list():
+		if not anim_name.begins_with(PREFIX):
+			continue
+		var anim := _player.get_animation(anim_name)
+		var tr := anim.find_track(path, Animation.TYPE_ROTATION_3D)
+		if tr < 0:
+			continue
+		for k in anim.track_get_key_count(tr):
+			var q: Quaternion = anim.track_get_key_value(tr, k)
+			anim.track_set_key_value(tr, k, (spin * q).normalized())
 
 
 # The SOMA root travel of a clip, first frame to last, from mm.elf's clip table.
@@ -695,7 +871,7 @@ func _process(delta: float) -> void:
 			Input.is_key_pressed(KEY_SHIFT) or Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) > 0.5
 		)
 	)
-	if _test:
+	if _test and not _keys_testing:
 		_mode = _test_mode
 		_jump_pressed = _jump_pressed or _test_jump
 		_test_jump = false
@@ -753,6 +929,13 @@ func _process(delta: float) -> void:
 	var turn: float = float(r[4]) - float(r[7])
 	var char_scene := Vector3(r[2], 0, r[3]).rotated(Vector3.UP, _phi) * _scale + _origin
 	_scene.transform = Transform3D(Basis(Vector3.UP, turn), char_scene)
+	if _trace:
+		var hb := _skeleton.find_bone(_hips_path.get_slice(":", 1))
+		var hw := (_skeleton.global_transform * _skeleton.get_bone_global_pose(hb)).origin
+		print(
+			"MOVE-TRACE %d %s t=%.3f pos=%.3f hips=%.3f,%.3f char=%.3f,%.3f"
+			% [Engine.get_process_frames(), name, t, _player.current_animation_position, hw.x, hw.z, char_scene.x, char_scene.z]
+		)
 	# The camera follows.
 	var cc := get_parent().get_node_or_null("CamController") as Node3D
 	if cc:
@@ -801,9 +984,7 @@ func _run_test() -> void:
 		var shifted := _node.names.slice(1)
 		shifted.append(_node.names[0])
 		_node.names = shifted
-	if not await _keys_go_to_walk_mode():
-		get_tree().quit(1)
-		return
+	var keys_ok := await _key_test()
 	var shots := OS.get_environment("MOVE_SHOT")
 	var cc := get_parent().get_node_or_null("CamController") as Node3D
 	if shots != "" and cc:
@@ -822,7 +1003,7 @@ func _run_test() -> void:
 		["crawl", Vector2(0, 1), false, 6.0, 0.0, CRAWL, false],
 		["stand", Vector2.ZERO, false, 3.0, 0.0, STAND, false],
 	]
-	var ok := true
+	var ok := keys_ok
 	for step in plan:
 		_test_input = step[1]
 		_test_run = step[2]
@@ -975,3 +1156,45 @@ func _test_tap(name: String, run: bool) -> float:
 		)
 	)
 	return arrived if good else -1.0
+
+
+# Walk keys go to the walk only: with the Loop toggle focused, Space jumps and does not flip the
+# toggle, and C crouches and does not show the colour chart. Sends real key events.
+func _key_test() -> bool:
+	var chart := get_tree().root.find_child("ColorCharts", true, false) as Node3D
+	var toggle_btn: CheckButton = null
+	for b in get_tree().root.find_children("*", "CheckButton", true, false):
+		if (b as CheckButton).text == "Loop":
+			toggle_btn = b
+	var chart_was: bool = chart.visible if chart else false
+	var loop_was: bool = toggle_btn.button_pressed if toggle_btn else false
+	_keys_testing = true
+	var jumps0 := _space_jumps
+	if toggle_btn:
+		toggle_btn.grab_focus()
+	for key in [KEY_C, KEY_SPACE]:
+		for down in [true, false]:
+			var e := InputEventKey.new()
+			e.keycode = key
+			e.physical_keycode = key
+			e.pressed = down
+			Input.parse_input_event(e)
+			await get_tree().process_frame
+	await get_tree().process_frame
+	var crouched := _mode == CROUCH
+	var jumped := _space_jumps > jumps0
+	_keys_testing = false
+	_jump_pressed = false
+	var chart_same: bool = chart == null or chart.visible == chart_was
+	var loop_same: bool = toggle_btn == null or toggle_btn.button_pressed == loop_was
+	_mode = STAND
+	if toggle_btn:
+		toggle_btn.release_focus()
+	var good := crouched and jumped and chart_same and loop_same and chart != null and toggle_btn != null
+	print(
+		(
+			"MOVE-STEP keys crouched=%s jumped=%s chart_unchanged=%s loop_unchanged=%s found=%s,%s %s"
+			% [crouched, jumped, chart_same, loop_same, chart != null, toggle_btn != null, "ok" if good else "BAD"]
+		)
+	)
+	return good

@@ -1144,6 +1144,7 @@ func _run_test() -> void:
 		# Judge the second half of each step: the first half is the change of direction.
 		var p0 := _last_world
 		var faces: Array[Vector2] = []
+		var face_at: Array = []
 		while t < step[3]:
 			await get_tree().process_frame
 			var dt := get_process_delta_time()
@@ -1169,6 +1170,7 @@ func _run_test() -> void:
 				kind_ok += dt if _kind == step[5] else 0.0
 				var f := _hips_forward()
 				faces.append(Vector2(f.x, f.z).normalized() * dt)
+				face_at.append([t, str(_keys[_clip])])
 		var moved: Vector3 = _last_world - p0
 		var secs: float = step[3] * 0.5
 		var speed: float = Vector2(moved.x, moved.z).length() / secs
@@ -1192,10 +1194,19 @@ func _run_test() -> void:
 		var mean_face := Vector2.ZERO
 		var face_worst := 0.0
 		var way := Vector2(moved.x, moved.z)
-		for f in faces:
+		var worst_at := [0.0, ""]
+		for i in faces.size():
+			var f: Vector2 = faces[i]
 			mean_face += f
 			if way.length() > 0.01 and f.length() > 0.0:
-				face_worst = max(face_worst, abs(rad_to_deg(way.angle_to(f))))
+				var a: float = abs(rad_to_deg(way.angle_to(f)))
+				if a > face_worst:
+					face_worst = a
+					worst_at = face_at[i]
+		if step[0] == "run":
+			print("MOVE-FACE run worst=%.0f at=%.3fs of %.1fs clip=%s" % [face_worst, worst_at[0], step[3], worst_at[1]])
+			for i in range(0, faces.size(), max(1, faces.size() / 24)):
+				print("MOVE-FACE t=%.3f off=%.0f clip=%s" % [face_at[i][0], rad_to_deg(way.angle_to(faces[i])), face_at[i][1]])
 		var face_off: float = (
 			rad_to_deg(way.angle_to(mean_face))
 			if moved.length() > 0.01 and mean_face.length() > 0.0

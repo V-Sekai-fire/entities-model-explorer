@@ -11,7 +11,9 @@
 #            named libgodot_riscv.<os>.template_release.double.<arch>[.so|.dll|.framework]
 #   ELF      skintokens.elf
 #   USD_ELF  usd.elf (interactor-usd-guest), the OpenUSD reader for .usd, .usda, .usdc and .usdz
-# <w> holds mesh-encoder.gguf, skin-vae.gguf and tokenrig.gguf.
+#   MOTION_ELF  motion.elf (interactor-motion-guest)
+# <w> holds mesh-encoder.gguf, skin-vae.gguf, tokenrig.gguf and
+# Kimodo-SOMA-RP-v1.1-gguf/kimodo-soma-rp-v1.1.gguf (chibifire/Kimodo-SOMA-RP-v1.1-gguf).
 # The pck is OS-independent; `package` runs anywhere with zip and tar (the Windows desk's WSL is
 # fastest for the 1.3 GB archives). Archives store the weights uncompressed (zip -0 for .gguf).
 set -eu
@@ -38,11 +40,12 @@ linux.double.x86_64 = "./libgodot_riscv.linux.template_release.double.x86_64.so"
 E
   cp "$ELF" "$src/skintokens.elf"
   cp "$USD_ELF" "$src/usd.elf"
+  cp "$MOTION_ELF" "$src/motion.elf"
   G="$ENGINE/godot.macos.editor.double.arm64"
   "$G" --headless --path "$src" --import > "$out/import.log" 2>&1 || true
   "$G" --headless --path "$src" --export-pack Linux "$out/skintokens-viewer.pck" > "$out/export.log" 2>&1
   if grep -q "SCRIPT ERROR" "$out/export.log"; then echo "SCRIPT ERROR in export.log"; exit 1; fi
-  for f in skintokens.elf usd.elf godot-riscv.gdextension AutoRig.gd UsdImport.gd; do
+  for f in skintokens.elf usd.elf motion.elf godot-riscv.gdextension AutoRig.gd UsdImport.gd Motion.gd clips.tsv walk.f32; do
     grep -aq "$f" "$out/skintokens-viewer.pck" || { echo "pck lacks $f"; exit 1; }
   done
   echo "PCK-OK $(wc -c < "$out/skintokens-viewer.pck") bytes"
@@ -51,7 +54,9 @@ fi
 
 [ "$cmd" = package ] || { sed -n 2,16p "$0"; exit 2; }
 w=$3
-for f in mesh-encoder.gguf skin-vae.gguf tokenrig.gguf; do [ -f "$w/$f" ] || { echo "missing $w/$f"; exit 1; }; done
+for f in mesh-encoder.gguf skin-vae.gguf tokenrig.gguf Kimodo-SOMA-RP-v1.1-gguf/kimodo-soma-rp-v1.1.gguf; do
+  [ -f "$w/$f" ] || { echo "missing $w/$f"; exit 1; }
+done
 lay() { # <os> <runtime> <exe name> <library>
   d="$out/$1/skintokens-viewer"
   rm -rf "$out/$1" && mkdir -p "$d/w"
@@ -60,6 +65,8 @@ lay() { # <os> <runtime> <exe name> <library>
   cp -R "$SANDBOX/$4" "$d/"
   cp "$ENGINE/LICENSE-model-explorer.txt" "$d/"
   cp "$w"/mesh-encoder.gguf "$w"/skin-vae.gguf "$w"/tokenrig.gguf "$d/w/"
+  mkdir -p "$d/w/Kimodo-SOMA-RP-v1.1-gguf"
+  cp "$w"/Kimodo-SOMA-RP-v1.1-gguf/kimodo-soma-rp-v1.1.gguf "$d/w/Kimodo-SOMA-RP-v1.1-gguf/"
 }
 lay macos godot.macos.template_release.double.arm64 skintokens-viewer \
   libgodot_riscv.macos.template_release.double.universal.framework

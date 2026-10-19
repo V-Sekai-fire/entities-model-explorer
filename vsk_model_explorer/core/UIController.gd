@@ -429,6 +429,33 @@ func _on_root_gltf_is_loaded(success, gltf: Node):
 			loopToggle.toggled.connect(_set_loop)
 			Row.add_child.call_deferred(loopToggle)
 
+	# The motion list: a clip of the set for a model with a rig. Double-click makes it (Kimodo).
+	var motion = owner.get("motion")
+	if motion and not gltf.find_children("*", "Skeleton3D").is_empty():
+		var clips: Array = motion.clips()
+		if not clips.is_empty():
+			var motionTree: Tree = Tree.new()
+			motionTree.add_to_group(DYNAMIC_CONTROL_GROUP)
+			motionTree.columns = 2
+			motionTree.column_titles_visible = true
+			motionTree.hide_root = true
+			motionTree.mouse_filter = Control.MOUSE_FILTER_PASS
+			motionTree.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			motionTree.select_mode = Tree.SELECT_ROW
+			motionTree.tooltip_text = "Double-click a clip to make it for this rig."
+			_card_list(motionTree, "Motion (%d)" % clips.size())
+			motionTree.set_column_title(1, "")
+			motionTree.item_activated.connect(_on_motion_item_double_clicked.bind(motionTree))
+			motionTree.gui_input.connect(_on_scroll_input.bind(motionTree))
+			var motionRoot = motionTree.create_item()
+			for c in clips:
+				var item: TreeItem = motionTree.create_item(motionRoot)
+				item.set_text(0, c[0].replace("_", " "))
+				item.set_text(1, "loop" if c[1] == "loop" else "once")
+				item.set_metadata(0, c[0])
+			Row.add_child.call_deferred(motionTree)
+	_play_after_load.call_deferred()
+
 	# Create convex collision
 	for mesh in meshes:
 		mesh = mesh as MeshInstance3D
@@ -534,6 +561,28 @@ func _on_animation_item_double_clicked(tree: Tree):
 			if node.get_mesh() is ArrayMesh:
 				for i in range(node.get_mesh().get_blend_shape_count()):
 					node.set("blend_shapes/" + node.get_mesh().get_blend_shape_name(i), 0)
+
+
+func _on_motion_item_double_clicked(tree: Tree) -> void:
+	var item: TreeItem = tree.get_selected()
+	var motion = owner.get("motion")
+	if item and motion:
+		motion.make(item.get_metadata(0))
+
+
+# After the motion step reopens the file, play the clip it added (Loop toggle applies).
+func _play_after_load() -> void:
+	var clip: String = owner.get("play_after_load") if owner.get("play_after_load") else ""
+	if clip == "":
+		return
+	owner.set("play_after_load", "")
+	for p in animationPlayers:
+		if p is AnimationPlayer and p.has_animation(clip):
+			playing = [p, clip]
+			_apply_loop()
+			p.play(clip)
+			print("MOTION-PLAYING %s loop=%s" % [clip, loop_on])
+			return
 
 
 func _set_loop(on: bool) -> void:

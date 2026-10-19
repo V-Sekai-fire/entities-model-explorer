@@ -55,26 +55,6 @@ func _ready():
 	flex = Flex.new()
 	add_child(flex)
 	add_control_row(["keys", ["F"], "F", "Flex 20 min"])
-	# The colour chart beside the model: hidden at start, C shows or hides it.
-	color_chart = ColorChart.new()
-	add_child(color_chart)
-	add_control_row(["keys", ["C"], "C", "Colour chart"])
-	gltf_is_loaded.connect(_place_color_chart.unbind(2))
-	fbx_is_loaded.connect(_place_color_chart.unbind(2))
-	# P builds the campus (Sakuragaoka Station) when the build carries it.
-	if Campus.available():
-		campus = Campus.new()
-		add_child(campus)
-		add_control_row(["keys", ["P"], "P", "Campus"])
-		if "--campus" in OS.get_cmdline_user_args():
-			campus.toggle.call_deferred()
-	if OS.has_feature("web"):
-		# The page rigs the model; here R saves a rigged .glb or a .vrm as a VRM 1.0 file.
-		auto_rig = AutoRig.new()
-		add_child(auto_rig)
-		auto_rig.rigged.connect(_load_file)
-		add_control_row(["keys", ["R"], "R", "Save as .vrm"])
-	else:
 		# One pck, two desktop viewers: each feature is on when its weights are in the w folder.
 		# SkinTokens ships the rig weights; Kimodo motion ships the Kimodo weights.
 		auto_rig = AutoRig.new()

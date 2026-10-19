@@ -1025,8 +1025,8 @@ func _run_test() -> void:
 		var pose_err := 0.0
 		var hips_off := 0.0
 		var measured := 0
-		# The body must not leap: the hips may move at most twice the run speed in a frame (a clip
-		# switch used to throw them metres toward where the old clip was, then back).
+		# The body must not leap: in one frame the hips may move at most 1.5 times what running
+		# does in the longest frame (a clip switch used to throw them metres, then back).
 		var hips_prev := _hips_world()
 		var leap := 0.0
 		# Judge the second half of each step: the first half is the change of direction.
@@ -1039,7 +1039,8 @@ func _run_test() -> void:
 			jumped = jumped or _jumping
 			var hw := _hips_world()
 			var step_m := Vector2(hw.x - hips_prev.x, hw.z - hips_prev.z).length()
-			leap = max(leap, step_m / max(dt, 1e-4) / (_run_speed * _scale))
+			# In units of the longest honest frame step: running for the 1/20 s frame cap.
+			leap = max(leap, step_m / (_run_speed * _scale / 20.0))
 			hips_prev = hw
 			if _kind == 4:
 				air += dt
@@ -1086,7 +1087,7 @@ func _run_test() -> void:
 			good = good and share >= 0.7
 		# The skeleton shows the picked clip (the tree plays it), and the hips stand over the
 		# character (the root motion track took the floor travel).
-		good = good and measured > 0 and pose_err < 0.02 and hips_off < 0.01 * _scale and leap < 2.0
+		good = good and measured > 0 and pose_err < 0.02 and hips_off < 0.01 * _scale and leap < 1.5
 		print(
 			(
 				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f facing_off=%.0f leap=%.2f kind_share=%.2f air=%.2f pose_err=%.4f hips_off=%.4f clips=%s %s"

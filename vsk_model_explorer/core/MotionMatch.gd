@@ -436,7 +436,11 @@ func _process(delta: float) -> void:
 		_pad()
 	if not on or _mm == null:
 		return
-	var dt: float = clamp(delta, 1.0 / 240.0, 1.0 / 20.0)
+	# Step the controller by the real frame time. A floor here (it was 1/240 s) made the
+	# character move faster than the clock above 240 fps, for example with no vsync.
+	if delta <= 0.0:
+		return
+	var dt: float = min(delta, 1.0 / 20.0)
 	var input := _input_dir()
 	var running := (
 		_test_run

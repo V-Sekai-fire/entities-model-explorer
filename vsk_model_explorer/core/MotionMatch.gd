@@ -441,9 +441,12 @@ func _calibrate() -> bool:
 		_scale = c.scale
 		_phi = c.phi
 		_hips_path = c.hips
-		_skeleton = _player.get_node(_player.root_node).get_node_or_null(
-			NodePath(_hips_path.get_slice(":", 0))
-		) as Skeleton3D
+		_skeleton = (
+			_player.get_node(_player.root_node).get_node_or_null(
+				NodePath(_hips_path.get_slice(":", 0))
+			)
+			as Skeleton3D
+		)
 		return _skeleton != null
 	var best := 0.0
 	for t in walk.get_track_count():
@@ -535,7 +538,9 @@ func _in_place() -> void:
 			anim.track_set_key_value(tp, k, new_pos[k])
 		# Rotation keys sit at the same frames as the position keys (one key a frame).
 		for k in anim.track_get_key_count(tr):
-			var kp := anim.track_find_key(tp, anim.track_get_key_time(tr, k), Animation.FIND_MODE_APPROX)
+			var kp := anim.track_find_key(
+				tp, anim.track_get_key_time(tr, k), Animation.FIND_MODE_APPROX
+			)
 			if kp >= 0:
 				anim.track_set_key_value(tr, k, new_rot[kp])
 		stripped += 1
@@ -563,8 +568,17 @@ func _space_arms() -> void:
 		var need := _clear_angle(chain, mesh)
 		var held := _idle_spread(chain, idle)
 		var turn: float = max(0.0, need - held)
-		report.append("%s need=%.1f held=%.1f turn=%.1f" % [
-			_skeleton.get_bone_name(chain[1]), rad_to_deg(need), rad_to_deg(held), rad_to_deg(turn)])
+		report.append(
+			(
+				"%s need=%.1f held=%.1f turn=%.1f"
+				% [
+					_skeleton.get_bone_name(chain[1]),
+					rad_to_deg(need),
+					rad_to_deg(held),
+					rad_to_deg(turn)
+				]
+			)
+		)
 		if turn > 0.0:
 			_turn_arm(chain, turn)
 	idle.set_meta("arm_spacing", true)
@@ -707,9 +721,14 @@ func _idle_spread(chain: Array, idle: Animation) -> float:
 		var g := {}
 		var place := func(b: int) -> Transform3D:
 			var local := _skeleton.get_bone_rest(b)
-			var tr := idle.find_track(NodePath("%s:%s" % [_hips_path.get_slice(":", 0), _skeleton.get_bone_name(b)]), Animation.TYPE_ROTATION_3D)
+			var tr := idle.find_track(
+				NodePath("%s:%s" % [_hips_path.get_slice(":", 0), _skeleton.get_bone_name(b)]),
+				Animation.TYPE_ROTATION_3D
+			)
 			if tr >= 0:
-				local.basis = Basis(idle.rotation_track_interpolate(tr, t)).scaled(local.basis.get_scale())
+				local.basis = Basis(idle.rotation_track_interpolate(tr, t)).scaled(
+					local.basis.get_scale()
+				)
 			return local
 		# Pose relative to the chest at rest, so only the arm's own angles count.
 		var xf := _rest(_skeleton.get_bone_parent(chain[0]))
@@ -727,7 +746,9 @@ func _idle_spread(chain: Array, idle: Animation) -> float:
 func _turn_arm(chain: Array, angle: float) -> void:
 	var parent_rest := _rest(chain[0]).basis.get_rotation_quaternion()
 	var spin := Quaternion(parent_rest.inverse() * _axis(chain), angle)
-	var path := NodePath("%s:%s" % [_hips_path.get_slice(":", 0), _skeleton.get_bone_name(chain[1])])
+	var path := NodePath(
+		"%s:%s" % [_hips_path.get_slice(":", 0), _skeleton.get_bone_name(chain[1])]
+	)
 	for anim_name in _player.get_animation_list():
 		if not anim_name.begins_with(PREFIX):
 			continue
@@ -901,8 +922,19 @@ func _process(delta: float) -> void:
 		var hb := _skeleton.find_bone(_hips_path.get_slice(":", 1))
 		var hw := (_skeleton.global_transform * _skeleton.get_bone_global_pose(hb)).origin
 		print(
-			"MOVE-TRACE %d %s t=%.3f pos=%.3f hips=%.3f,%.3f char=%.3f,%.3f"
-			% [Engine.get_process_frames(), name, t, _player.current_animation_position, hw.x, hw.z, char_scene.x, char_scene.z]
+			(
+				"MOVE-TRACE %d %s t=%.3f pos=%.3f hips=%.3f,%.3f char=%.3f,%.3f"
+				% [
+					Engine.get_process_frames(),
+					name,
+					t,
+					_player.current_animation_position,
+					hw.x,
+					hw.z,
+					char_scene.x,
+					char_scene.z
+				]
+			)
 		)
 	# The camera follows.
 	var cc := get_parent().get_node_or_null("CamController") as Node3D
@@ -998,7 +1030,11 @@ func _run_test() -> void:
 		var heading: float = rad_to_deg(atan2(moved.dot(cr), moved.dot(cf)))
 		# Facing: the model's own forward (rest +Z turned by the scene) against the way it went.
 		var face := _scene.global_transform.basis * (_to_scene(_skeleton).basis * Vector3.BACK)
-		var face_off: float = rad_to_deg(Vector2(moved.x, moved.z).angle_to(Vector2(face.x, face.z))) if moved.length() > 0.01 else 0.0
+		var face_off: float = (
+			rad_to_deg(Vector2(moved.x, moved.z).angle_to(Vector2(face.x, face.z)))
+			if moved.length() > 0.01
+			else 0.0
+		)
 		var off: float = abs(wrapf(heading - step[4], -180.0, 180.0))
 		var share: float = kind_ok / kind_all if kind_all > 0.0 else 0.0
 		# Too fast fails too: a controller step that does not follow the frame time overshoots
@@ -1006,7 +1042,9 @@ func _run_test() -> void:
 		var good: bool = (
 			speed < 0.2 * _scale
 			if want == 0.0
-			else (speed > 0.6 * want and speed < 1.25 * want and off < 25.0 and abs(face_off) < 60.0)
+			else (
+				speed > 0.6 * want and speed < 1.25 * want and off < 25.0 and abs(face_off) < 60.0
+			)
 		)
 		if step[6]:
 			good = jumped and air > 0.1
@@ -1141,11 +1179,21 @@ func _key_test() -> bool:
 	_mode = STAND
 	if toggle_btn:
 		toggle_btn.release_focus()
-	var good := crouched and jumped and chart_same and loop_same and chart != null and toggle_btn != null
+	var good := (
+		crouched and jumped and chart_same and loop_same and chart != null and toggle_btn != null
+	)
 	print(
 		(
 			"MOVE-STEP keys crouched=%s jumped=%s chart_unchanged=%s loop_unchanged=%s found=%s,%s %s"
-			% [crouched, jumped, chart_same, loop_same, chart != null, toggle_btn != null, "ok" if good else "BAD"]
+			% [
+				crouched,
+				jumped,
+				chart_same,
+				loop_same,
+				chart != null,
+				toggle_btn != null,
+				"ok" if good else "BAD"
+			]
 		)
 	)
 	return good

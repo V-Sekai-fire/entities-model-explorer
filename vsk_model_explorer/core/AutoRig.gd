@@ -1,15 +1,16 @@
 extends Node
 # Desktop auto-rig: R rigs the open model with skintokens.elf in the godot-sandbox add-on, on a
 # local RenderingDevice (Vulkan, Metal or D3D12), and opens the result. The weights are the three
-# GGUF files in the folder `w` beside the program. The rigged GLB is saved beside the source
-# file as <name>.rigged.glb, or in the user folder if that one is read-only. When the rig passes
-# the humanoid gates (skintokens.elf), the viewer also saves it as <name>.vrm (VrmExport.gd, then
-# the same T-pose and joint frames as a .vrm input) and opens that file.
+# GGUF files in the folder `w` beside the program. When the rig passes the humanoid gates
+# (skintokens.elf), the result is saved only as <name>.vrm (VrmExport.gd, then the same T-pose and
+# joint frames as a .vrm input) and the viewer opens that file; a VRM 1.0 needs no glTF extension,
+# so other programs open it as a plain .glb. Any other rig is saved as <name>.rigged.glb. Both go
+# beside the source file, or in the user folder if that one is read-only.
 # A .vrm keeps its own skeleton: R saves it as VRM 1.0 (godot-vrm), puts it in a T-pose from any
 # pose and turns each joint's +Y along its bone (skintokens.elf, no weights), as <name>.tpose.vrm.
 # Every saved .vrm without one-eye blinks gets headfit.elf's anime eye closes (FaceBlink.gd).
 # An opened .usd, .usda, .usdc or .usdz file is rigged from the GLB the viewer made of it
-# (UsdImport.gd), and the result is <name>.rigged.glb beside the USD file.
+# (UsdImport.gd), and the result (<name>.vrm or <name>.rigged.glb) goes beside the USD file.
 # In the browser (web build) the rig runs on the page, not here: the page opens the rigged GLB in
 # the viewer. R then saves a rigged .glb (it has a skin) as <name>.vrm when it passes the humanoid
 # gates, and a .vrm as <name>.tpose.vrm, with the same steps, and the browser downloads the file.
@@ -235,8 +236,25 @@ func run(mesh: String) -> String:
 		return ""
 	cleanup()
 	var base := output_base if output_base != "" else mesh.get_basename()
+	# The rig goes to a work file first. A humanoid is saved only as <base>.vrm: a VRM 1.0 file
+	# is a glTF that needs no extension, so programs without VRM support open it as a plain .glb.
+	# Any other rig (or a failed VRM step) is saved as <base>.rigged.glb. The work file keeps the
+	# model's name: the VRM step names the model and scene from it.
+	var work_dir := OS.get_user_data_dir().path_join("rig-work")
+	DirAccess.make_dir_recursive_absolute(work_dir)
+	var work := work_dir.path_join(base.get_file() + ".rigged.glb")
+	var f := FileAccess.open(work, FileAccess.WRITE)
+	if f == null:
+		return fail("cannot save the result")
+	f.store_buffer(glb)
+	f.close()
+	print("AUTO-RIG-RIGGED bytes=%d ms=%d" % [glb.size(), Time.get_ticks_msec() - t0])
+	var vrm := await rigged_to_vrm(work, base)
+	DirAccess.remove_absolute(work)
+	if vrm != "":
+		return vrm
 	var out := base + ".rigged.glb"
-	var f := FileAccess.open(out, FileAccess.WRITE)
+	f = FileAccess.open(out, FileAccess.WRITE)
 	if f == null:
 		out = OS.get_user_data_dir().path_join(base.get_file() + ".rigged.glb")
 		f = FileAccess.open(out, FileAccess.WRITE)
@@ -245,8 +263,7 @@ func run(mesh: String) -> String:
 	f.store_buffer(glb)
 	f.close()
 	print("AUTO-RIG-OK %s bytes=%d ms=%d" % [out, glb.size(), Time.get_ticks_msec() - t0])
-	var vrm := await rigged_to_vrm(out, base)
-	return vrm if vrm != "" else out
+	return out
 
 
 func new_sandbox() -> void:

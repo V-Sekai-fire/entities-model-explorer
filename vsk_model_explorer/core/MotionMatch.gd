@@ -91,6 +91,7 @@ var _press_down := false
 var _press_run := false
 var _marker: MeshInstance3D
 var _last_status := ""
+var _last_walk_key := KEY_NONE
 
 
 func _ready() -> void:
@@ -110,21 +111,39 @@ func say(text: String) -> void:
 		_last_status = text
 	if status.is_valid():
 		status.call(text)
-	if _test and text.begins_with("Move failed"):
+	if _test and (text.begins_with("Move failed") or text.begins_with("Motion failed")):
 		printerr("MOVE-FAIL ", text)
+
+
+# In walk mode these keys belong to walk mode: _input takes them before the buttons and every
+# other key (C colour chart, W wireframe, Space on a focused button) sees them.
+const WALK_KEYS := [KEY_W, KEY_A, KEY_S, KEY_D, KEY_SHIFT, KEY_C, KEY_Z, KEY_SPACE, KEY_M]
+
+
+func _input(event: InputEvent) -> void:
+	var k := event as InputEventKey
+	if not on or not k or not k.keycode in WALK_KEYS:
+		return
+	get_viewport().set_input_as_handled()
+	if k.pressed and not k.echo:
+		_walk_key(k.keycode)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
-	if not k or not k.pressed or k.echo:
-		return
-	if k.keycode == KEY_M:
+	if k and k.pressed and not k.echo and k.keycode == KEY_M:
 		toggle()
-	elif on and k.keycode == KEY_C:
+
+
+func _walk_key(key: Key) -> void:
+	_last_walk_key = key
+	if key == KEY_M:
+		toggle()
+	elif key == KEY_C:
 		_mode = STAND if _mode == CROUCH else CROUCH
-	elif on and k.keycode == KEY_Z:
+	elif key == KEY_Z:
 		_mode = STAND if _mode == CRAWL else CRAWL
-	elif on and k.keycode == KEY_SPACE:
+	elif key == KEY_SPACE:
 		_jump_pressed = true
 
 
@@ -244,8 +263,12 @@ func start() -> void:
 	if not available():
 		return say("Move needs mm.elf and the clips in res://motion/mm.")
 	if not _has_moves():
-		if source == "" or source.get_extension().to_lower() != "glb":
-			return say("Move needs an open .glb file with a rig.")
+		# A .vrm is a .glb file with a rig.
+		if source == "" or not source.get_extension().to_lower() in ["glb", "vrm"]:
+			_fail("Move needs an open .glb or .vrm file with a rig.")
+			if _test:
+				get_tree().quit(1)
+			return
 		busy = true
 		var out := await _make_moves()
 		busy = false
@@ -353,6 +376,35 @@ func _make_moves() -> String:
 	print("MOVE-MADE %s clips=%d ms=%d" % [out, keys.size(), Time.get_ticks_msec() - t0])
 	say("")
 	return out
+
+
+# In walk mode C crouches and does not show the colour chart.
+func _keys_go_to_walk_mode() -> bool:
+	var chart = get_parent().get("color_chart")
+	var shown: bool = chart.visible if chart else false
+	for pressed in [true, false]:
+		var k := InputEventKey.new()
+		k.keycode = KEY_C
+		k.physical_keycode = KEY_C
+		k.pressed = pressed
+		Input.parse_input_event(k)
+	# Parsed events reach the viewport when Input flushes them, a frame or two later.
+	for i in 3:
+		await get_tree().process_frame
+	var ok: bool = _last_walk_key == KEY_C and (chart == null or chart.visible == shown)
+	_mode = STAND
+	if ok:
+		print(
+			"MOVE-KEYS ok: C crouches, the colour chart stays %s" % ("shown" if shown else "hidden")
+		)
+	else:
+		printerr(
+			(
+				"MOVE-FAIL walk keys: C went to walk mode %s, colour chart %s -> %s"
+				% [_last_walk_key == KEY_C, shown, chart.visible if chart else shown]
+			)
+		)
+	return ok
 
 
 func _fail(why: String) -> String:
@@ -749,6 +801,9 @@ func _run_test() -> void:
 		var shifted := _node.names.slice(1)
 		shifted.append(_node.names[0])
 		_node.names = shifted
+	if not await _keys_go_to_walk_mode():
+		get_tree().quit(1)
+		return
 	var shots := OS.get_environment("MOVE_SHOT")
 	var cc := get_parent().get_node_or_null("CamController") as Node3D
 	if shots != "" and cc:

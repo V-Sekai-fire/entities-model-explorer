@@ -2,7 +2,8 @@ extends RefCounted
 # Writes a rigged humanoid as a VRM 1.0 file. The humanoid roles come from the rig program's
 # matcher (role -> skeleton bone name). The export renames those bones to Godot's humanoid names,
 # turns the model to face +Z (left on +X), swaps every material to MToon and writes the file with
-# the VRM add-on's glTF extensions. Materials are always MToon: many VRM players refuse PBR.
+# the VRM add-on's glTF extensions. The T-pose is not done here: skintokens.elf's VRM step does it
+# afterwards, as for any .vrm. Materials are always MToon: many VRM players refuse PBR.
 # MToon defaults come from a ColorChecker calibration against the PBR look (24 patches, mean
 # dE2000 1.5 under neutral light, 2.3 under the viewer's sky in physical light units): shade =
 # 0.2 x base, toony 0.2, shift 0, giEqualization 0.1. The MToon 1.0 defaults score 7.0 there.
@@ -97,6 +98,7 @@ func _build(scene: Node, roles: Dictionary, title: String) -> String:
 		roles.spine2 = roles.chest  # VRM needs chest before upperChest
 		roles.erase("chest")
 	var to_scene := _to_root(skel, scene)
+	var surfaces := _surface_count(scene)
 	var p := func(role: String) -> Vector3:
 		return to_scene * skel.get_bone_global_rest(skel.find_bone(roles[role])).origin
 	if p.call("head").y <= p.call("hips").y:
@@ -119,11 +121,17 @@ func _build(scene: Node, roles: Dictionary, title: String) -> String:
 	var yaw := atan2(forward.x, forward.z)
 	report.turned_degrees = rad_to_deg(-yaw)
 	_turn(scene, skel, Transform3D(Basis(Vector3.UP, -yaw), Vector3.ZERO), to_scene)
-	report.arm_drop_before = _t_pose(scene, skel, roles, to_scene)
+	# The T-pose comes after the export (skintokens.elf's VRM step: from any pose, with the mesh
+	# skinned into it), so this file keeps the rig's own rest pose.
 	# The VRM carries no clips: its rest pose is the pose.
 	for ap in scene.find_children("*", "AnimationPlayer", true, false):
 		ap.get_parent().remove_child(ap)
 		ap.free()
+	if _surface_count(scene) != surfaces:
+		return (
+			"lost mesh surfaces while turning or posing (%d of %d left)"
+			% [_surface_count(scene), surfaces]
+		)
 	_rename_bones(scene, skel, roles)
 	skel.name = "GeneralSkeleton"
 	report.mtoon_materials = _to_mtoon(scene)
@@ -199,171 +207,6 @@ static func _to_root(node: Node3D, root: Node) -> Transform3D:
 	return t
 
 
-# VRM's rest pose is a T-pose: arms straight out along +-X. An arm hanging more than
-# T_POSE_TOLERANCE degrees below that is raised by turning the upper arm and then the forearm,
-# and the meshes are re-bound in the new rest pose (_bake_rest). Returns the drops it found.
-const T_POSE_TOLERANCE := 5.0
-
-
-static func _t_pose(
-	scene: Node, skel: Skeleton3D, roles: Dictionary, to_scene: Transform3D
-) -> Array:
-	var drops := []
-	var new_rest := {}
-	var to_skel := to_scene.basis.inverse()
-	for side in ["left", "right"]:
-		var out_dir: Vector3 = (
-			(to_skel * (Vector3.RIGHT if side == "left" else Vector3.LEFT)).normalized()
-		)
-		var chain := [roles[side + "_upper_arm"], roles[side + "_forearm"], roles[side + "_hand"]]
-		var idx := chain.map(func(n): return skel.find_bone(n))
-		var d: Vector3 = (
-			to_scene.basis
-			* (
-				_global_rest(skel, idx[1], new_rest).origin
-				- _global_rest(skel, idx[0], new_rest).origin
-			)
-		)
-		var drop := rad_to_deg(atan2(-d.y, Vector2(d.x, d.z).length()))
-		drops.append(snappedf(drop, 0.1))
-		if absf(drop) <= T_POSE_TOLERANCE:
-			continue
-		for k in 2:  # upper arm, then forearm, each pointed along out_dir
-			var g := _global_rest(skel, idx[k], new_rest)
-			var dir := (_global_rest(skel, idx[k + 1], new_rest).origin - g.origin).normalized()
-			var q := Quaternion(dir, out_dir)
-			var parent := skel.get_bone_parent(idx[k])
-			var pg := _global_rest(skel, parent, new_rest) if parent >= 0 else Transform3D.IDENTITY
-			var ng := Transform3D(Basis(q) * g.basis, g.origin)
-			new_rest[idx[k]] = pg.affine_inverse() * ng
-	if not new_rest.is_empty():
-		_bake_rest(scene, skel, new_rest)
-	return drops
-
-
-static func _global_rest(skel: Skeleton3D, bone: int, override: Dictionary) -> Transform3D:
-	var t := Transform3D.IDENTITY
-	while bone >= 0:
-		t = (override[bone] if override.has(bone) else skel.get_bone_rest(bone)) * t
-		bone = skel.get_bone_parent(bone)
-	return t
-
-
-# Re-binds every skinned mesh in a new rest pose. Per bone, D = (G B)^-1 * G' B moves a vertex
-# from the old rest to the new one; vertices, normals, tangents and blend-shape deltas are blended
-# by their skin weights, and binds become B' = G'^-1 G B so G' B' = G B (the mesh-to-skeleton map).
-static func _bake_rest(scene: Node, skel: Skeleton3D, new_rest: Dictionary) -> void:
-	var old_g := []
-	var new_g := []
-	for b in skel.get_bone_count():
-		old_g.append(_global_rest(skel, b, {}))
-		new_g.append(_global_rest(skel, b, new_rest))
-	var done := {}
-	for mi in scene.find_children("*", "MeshInstance3D", true, false):
-		var skin: Skin = mi.skin
-		if skin == null or not (mi.mesh is ArrayMesh) or done.has(mi.mesh):
-			continue
-		var d := []  # per bind index
-		var new_binds := []
-		for i in skin.get_bind_count():
-			var b := skin.get_bind_bone(i)
-			if skin.get_bind_name(i) != &"":
-				b = skel.find_bone(skin.get_bind_name(i))
-			var bind := skin.get_bind_pose(i)
-			if b < 0:
-				d.append(Transform3D.IDENTITY)
-				new_binds.append(bind)
-				continue
-			d.append((old_g[b] * bind).affine_inverse() * new_g[b] * bind)
-			new_binds.append(new_g[b].affine_inverse() * old_g[b] * bind)
-		var src: ArrayMesh = mi.mesh
-		var dst := ArrayMesh.new()
-		dst.resource_name = src.resource_name
-		dst.blend_shape_mode = src.blend_shape_mode
-		for i in src.get_blend_shape_count():
-			dst.add_blend_shape(src.get_blend_shape_name(i))
-		var relative := src.blend_shape_mode == Mesh.BLEND_SHAPE_MODE_RELATIVE
-		for s in src.get_surface_count():
-			var arrays := src.surface_get_arrays(s)
-			var per_vertex := _blend(arrays, d, src.surface_get_format(s))
-			var shapes := []
-			for shape in src.surface_get_blend_shape_arrays(s):
-				shapes.append(_apply_per_vertex(shape, per_vertex, relative))
-			arrays = _apply_per_vertex(arrays, per_vertex, false)
-			var flags := src.surface_get_format(s) & Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
-			dst.add_surface_from_arrays(
-				src.surface_get_primitive_type(s), arrays, shapes, {}, flags
-			)
-			dst.surface_set_material(s, src.surface_get_material(s))
-			dst.surface_set_name(s, src.surface_get_name(s))
-		done[src] = dst
-		for i in skin.get_bind_count():
-			skin.set_bind_pose(i, new_binds[i])
-	for mi in scene.find_children("*", "MeshInstance3D", true, false):
-		if done.has(mi.mesh):
-			mi.mesh = done[mi.mesh]
-	for b in new_rest:
-		skel.set_bone_rest(b, new_rest[b])
-		skel.set_bone_pose(b, new_rest[b])
-
-
-# Per-vertex blended transform from the skin weights.
-static func _blend(arrays: Array, d: Array, format: int) -> Array:
-	var bones: PackedInt32Array = arrays[Mesh.ARRAY_BONES]
-	var weights: PackedFloat32Array = arrays[Mesh.ARRAY_WEIGHTS]
-	var n: int = arrays[Mesh.ARRAY_VERTEX].size()
-	var k := 8 if format & Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS else 4
-	var out := []
-	out.resize(n)
-	for v in n:
-		var basis := Basis(Vector3.ZERO, Vector3.ZERO, Vector3.ZERO)
-		var origin := Vector3.ZERO
-		for j in k:
-			var w := weights[v * k + j]
-			if w == 0.0:
-				continue
-			var t: Transform3D = d[bones[v * k + j]]
-			basis.x += t.basis.x * w
-			basis.y += t.basis.y * w
-			basis.z += t.basis.z * w
-			origin += t.origin * w
-		out[v] = Transform3D(basis, origin)
-	return out
-
-
-static func _apply_per_vertex(arrays: Array, per_vertex: Array, deltas: bool) -> Array:
-	if arrays[Mesh.ARRAY_VERTEX] is PackedVector3Array:
-		var p: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-		for i in p.size():
-			var t: Transform3D = per_vertex[i]
-			p[i] = t.basis * p[i] if deltas else t * p[i]
-		arrays[Mesh.ARRAY_VERTEX] = p
-	if arrays[Mesh.ARRAY_NORMAL] is PackedVector3Array:
-		var nr: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
-		for i in nr.size():
-			var t: Transform3D = per_vertex[i]
-			nr[i] = t.basis.inverse().transposed() * nr[i]
-			if not deltas:
-				nr[i] = nr[i].normalized()
-		arrays[Mesh.ARRAY_NORMAL] = nr
-	if arrays[Mesh.ARRAY_TANGENT] is PackedFloat32Array:
-		var tg: PackedFloat32Array = arrays[Mesh.ARRAY_TANGENT]
-		for i in range(0, tg.size(), 4):
-			var t: Transform3D = per_vertex[i / 4]
-			var r := t.basis * Vector3(tg[i], tg[i + 1], tg[i + 2])
-			if not deltas:
-				r = r.normalized()
-			tg[i] = r.x
-			tg[i + 1] = r.y
-			tg[i + 2] = r.z
-		arrays[Mesh.ARRAY_TANGENT] = tg
-	return arrays
-
-
-# Turns the model about the vertical axis. In skeleton space (turn t): root bone rests become
-# t * rest, so every bone's global rest is t * G; skinned vertices become t * v and bind poses
-# B * t^-1, so the skinned result is t * G * B * v and the stored mesh still matches its bind pose
-# (VRM tools that read the bind pose see the turned model too). Unskinned nodes turn as nodes.
 static func _turn(scene: Node, skel: Skeleton3D, turn: Transform3D, to_scene: Transform3D) -> void:
 	if turn.basis.is_equal_approx(Basis.IDENTITY):
 		return
@@ -398,11 +241,30 @@ static func _transformed_mesh(src: ArrayMesh, t: Transform3D) -> ArrayMesh:
 		var shapes: Array = []
 		for shape in src.surface_get_blend_shape_arrays(s):
 			shapes.append(_transform_arrays(shape, t, relative))
-		var flags := src.surface_get_format(s) & Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
+		var flags := _rebuild_flags(src.surface_get_format(s))
 		dst.add_surface_from_arrays(src.surface_get_primitive_type(s), arrays, shapes, {}, flags)
 		dst.surface_set_material(s, src.surface_get_material(s))
 		dst.surface_set_name(s, src.surface_get_name(s))
 	return dst
+
+
+# Flags a rebuilt surface must keep: 8 bone weights and the formats of the custom channels (a
+# glTF's extra UV sets land there). Without them Godot reads every custom channel as RGBA8
+# bytes and drops the surface.
+static func _rebuild_flags(format: int) -> int:
+	var keep := Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
+	for c in 4:
+		var shift := Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT + c * Mesh.ARRAY_FORMAT_CUSTOM_BITS
+		keep |= Mesh.ARRAY_FORMAT_CUSTOM_MASK << shift
+	return format & keep
+
+
+static func _surface_count(scene: Node) -> int:
+	var n := 0
+	for mi in scene.find_children("*", "MeshInstance3D", true, false):
+		if mi.mesh:
+			n += mi.mesh.get_surface_count()
+	return n
 
 
 static func _transform_arrays(arrays: Array, t: Transform3D, deltas: bool) -> Array:

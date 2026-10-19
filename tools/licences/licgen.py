@@ -54,7 +54,7 @@ def text_block(name):
 # where: {pck} -> the viewer's pck name, {app} -> the program name.
 PARTS = [
     ("[interactor-skintokens-guest](" + GH + "V-Sekai-fire/interactor-skintokens-guest) (rig program `skintokens.elf`)",
-     "in `{pck}`",
+     "`skintokens.elf` in `{pck}`",
      "All rights reserved. Licensed only to K. S. Ernest (iFire) Lee; a free and open-source licence is not yet decided",
      "interactor-skintokens-guest", "interactor-skintokens-guest", None),
     ("[skin-tokens-ggml](" + GH + "V-Sekai-fire/skin-tokens-ggml)", "inside `skintokens.elf`", "Apache-2.0",
@@ -62,7 +62,7 @@ PARTS = [
     ("[SkinTokens](" + GH + "VAST-AI-Research/SkinTokens) by VAST-AI-Research (the model code that skin-tokens-ggml follows)",
      "inside `skintokens.elf`", "MIT", "SkinTokens", "SkinTokens (TokenRig)", None),
     ("[interactor-motion-guest](" + GH + "V-Sekai-fire/interactor-motion-guest) (animation program `motion.elf`)",
-     "in `{pck}`", "MIT", "interactor-motion-guest", "interactor-motion-guest", None),
+     "`motion.elf` in `{pck}`", "MIT", "interactor-motion-guest", "interactor-motion-guest", None),
     ("[kimodo-ggml](" + GH + "V-Sekai-fire/kimodo-ggml) and [motion-bricks-ggml](" + GH + "V-Sekai-fire/motion-bricks-ggml)",
      "inside `motion.elf`", "Apache-2.0", None, "kimodo-ggml", None),
     ("[Kimodo](" + GH + "nv-tlabs/kimodo) by NVIDIA (the model code that kimodo-ggml follows)",
@@ -73,10 +73,10 @@ PARTS = [
     ("[nlohmann/json](" + GH + "nlohmann/json)", "inside `skintokens.elf`", "MIT", "nlohmann/json",
      "JSON for Modern C++", None),
     ("[interactor-headfit](" + GH + "V-Sekai-fire/interactor-headfit) (eye-close shapes `headfit.elf`)",
-     "in `{pck}`", "MIT", "interactor-headfit", "interactor-headfit", None),
+     "`headfit.elf` in `{pck}`", "MIT", "interactor-headfit", "interactor-headfit", None),
     ("[interactor-motion-matching-guest](" + GH + "V-Sekai-fire/interactor-motion-matching-guest) (walk mode "
      "`mm.elf`, a port of [godot-motion-matching](" + GH + "V-Sekai/godot-motion-matching) by Guilherme Sousa)",
-     "in `{pck}`", "MIT", "interactor-motion-matching-guest", "interactor-motion-matching-guest", None),
+     "`mm.elf` in `{pck}`", "MIT", "interactor-motion-matching-guest", "interactor-motion-matching-guest", None),
     ("Walk-mode clips from the [O3DE MotionMatching gem](" + GH + "o3de/o3de/tree/development/Gems/MotionMatching) "
      "(motion capture, moved onto the SOMA skeleton)",
      "`motion/mm/*.f32` in `{pck}`", "Apache-2.0 OR MIT (used here under MIT)",
@@ -91,7 +91,7 @@ PARTS = [
     ("[godot-vrm and Godot-MToon-Shader](" + GH + "V-Sekai/godot-vrm)", "in `{pck}`", "MIT",
      "godot-vrm and Godot-MToon-Shader", "godot-vrm and Godot-MToon-Shader", None),
     ("[interactor-usd-guest](" + GH + "V-Sekai-fire/interactor-usd-guest) (OpenUSD reader `usd.elf`)",
-     "in `{pck}`", "MIT", "interactor-usd-guest", "interactor-usd-guest", None),
+     "`usd.elf` in `{pck}`", "MIT", "interactor-usd-guest", "interactor-usd-guest", None),
     ("[OpenUSD](https://openusd.org)", "inside `usd.elf`", "Tomorrow Open Source Technology License 1.0",
      "OpenUSD (Tomorrow Open Source Technology License 1.0, with its third-party notices)", "OpenUSD", None),
     ("[oneTBB](" + GH + "uxlfoundation/oneTBB)", "inside `usd.elf`", "Apache-2.0", None, "oneTBB", None),

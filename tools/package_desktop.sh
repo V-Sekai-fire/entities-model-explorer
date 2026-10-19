@@ -45,6 +45,9 @@ cmd=$1 out=$(cd "$2" 2>/dev/null && pwd || (mkdir -p "$2" && cd "$2" && pwd))
 here=$(cd "$(dirname "$0")/.." && pwd)
 
 if [ "$cmd" = pck ]; then
+  # A second pck run into the same folder would overwrite this one's src mid-export.
+  mkdir "$out/.pck.lock" 2>/dev/null || { echo "another pck build is using $out"; exit 1; }
+  trap 'rmdir "$out/.pck.lock"' EXIT
   src="$out/src"
   rm -rf "$src" && mkdir -p "$src"
   git -C "$here" archive HEAD | tar -x -C "$src"

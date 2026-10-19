@@ -88,6 +88,8 @@ var _press_down := false
 var _press_run := false
 var _marker: MeshInstance3D
 var _keys_testing := false
+# Per arm: how far out from straight down the idle clip holds it (radians), before spacing.
+var _arm_held := []
 var _space_jumps := 0
 var _trace := OS.get_environment("MOVE_TRACE") != ""
 
@@ -646,6 +648,7 @@ func _space_arms() -> void:
 	for chain in arms:
 		var need := _clear_angle(chain, mesh)
 		var held := _idle_spread(chain, idle)
+		_arm_held.append(held)
 		var turn: float = clamp(need - held, 0.0, deg_to_rad(ARM_SPACING_MAX))
 		report.append(
 			(
@@ -844,7 +847,7 @@ func _idle_spread(chain: Array, idle: Animation) -> float:
 		var side := ax.cross(Vector3.DOWN)
 		vals.append(atan2(d.dot(side), -d.y))
 	vals.sort()
-	return max(0.0, vals[vals.size() / 2])
+	return vals[vals.size() / 2]
 
 
 func _turn_arm(chain: Array, angle: float) -> void:
@@ -1060,6 +1063,21 @@ func _run_test() -> void:
 		return
 	_begin()
 	var keys_ok := await _key_test()
+	# An arm whose idle hangs past straight down crosses into the body (an A-pose model played
+	# without the T-pose step: Mint's arms went behind her back).
+	var arms_ok: bool = (
+		_arm_held.size() == 2 and _arm_held.all(func(h): return h > deg_to_rad(-5.0))
+	)
+	print(
+		(
+			"MOVE-STEP arms held=%s %s"
+			% [
+				str(_arm_held.map(func(h): return snappedf(rad_to_deg(h), 0.1))),
+				"ok" if arms_ok else "BAD"
+			]
+		)
+	)
+	keys_ok = keys_ok and arms_ok
 	var shots := OS.get_environment("MOVE_SHOT")
 	var cc := get_parent().get_node_or_null("CamController") as Node3D
 	if shots != "" and cc:

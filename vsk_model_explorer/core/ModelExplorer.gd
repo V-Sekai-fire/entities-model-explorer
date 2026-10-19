@@ -11,6 +11,7 @@ var worker: Worker
 const gltf_vrm_extension_const = preload("res://addons/vrm/vrm_extension.gd")
 const ControlsCard = preload("res://vsk_model_explorer/core/ControlsCard.gd")
 const AutoRig = preload("res://vsk_model_explorer/core/AutoRig.gd")
+const Bintr = preload("res://vsk_model_explorer/core/Bintr.gd")
 const UsdImport = preload("res://vsk_model_explorer/core/UsdImport.gd")
 const USD_EXTENSIONS := ["usd", "usda", "usdc", "usdz"]
 var auto_rig: Node
@@ -28,6 +29,11 @@ var controls_card: Control
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
+	if not OS.has_feature("web"):
+		Bintr.setup()
+		if "--bintr-emit" in OS.get_cmdline_user_args():
+			Bintr.emit(self)
+			return
 	get_viewport().files_dropped.connect(_on_file_dropped)
 	# The controls card, bottom right on top of the 3D view; H shows or hides it.
 	_ensure_controls_card()
@@ -198,6 +204,7 @@ func _usd_to_glb(path: String) -> String:
 	var dir := OS.get_user_data_dir().path_join("usd")
 	DirAccess.make_dir_recursive_absolute(dir)
 	var out := dir.path_join(path.get_file().get_basename() + ".glb")
+	var t0 := Time.get_ticks_msec()
 	var usd := UsdImport.new()
 	add_child(usd)
 	var why := usd.to_glb(path, out)
@@ -207,7 +214,7 @@ func _usd_to_glb(path: String) -> String:
 		if auto_rig:
 			auto_rig.show_status(why)
 		return ""
-	print("USD-OK %s -> %s" % [path, out])
+	print("USD-OK %s -> %s ms=%d" % [path, out, Time.get_ticks_msec() - t0])
 	return out
 
 

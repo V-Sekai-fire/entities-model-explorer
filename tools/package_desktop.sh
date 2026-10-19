@@ -18,6 +18,9 @@
 #   ELF      skintokens.elf
 #   USD_ELF  usd.elf (interactor-usd-guest), the OpenUSD reader for .usd, .usda, .usdc and .usdz
 #   MOTION_ELF  motion.elf (interactor-motion-guest)
+#   BINTR    optional: dir with macos/, windows/ and linux/, each holding that OS's native
+#            translations bintr-<HASH>.dylib, .dll or .so (tools/compile_bintr.sh); a package
+#            without them runs every guest in the interpreter
 # <w> holds mesh-encoder.gguf, skin-vae.gguf and tokenrig.gguf (skintokens), or
 # Kimodo-SOMA-RP-v1.1-gguf/kimodo-soma-rp-v1.1.gguf (kimodo-motion, chibifire/Kimodo-SOMA-RP-v1.1-gguf).
 # The pck is OS-independent; `package` runs anywhere with zip and tar (the Windows desk's WSL is
@@ -51,7 +54,7 @@ E
   "$G" --headless --path "$src" --import > "$out/import.log" 2>&1 || true
   "$G" --headless --path "$src" --export-pack Linux "$out/skintokens-viewer.pck" > "$out/export.log" 2>&1
   if grep -q "SCRIPT ERROR" "$out/export.log"; then echo "SCRIPT ERROR in export.log"; exit 1; fi
-  for f in skintokens.elf usd.elf motion.elf godot-riscv.gdextension AutoRig.gd UsdImport.gd Motion.gd clips.tsv walk.f32; do
+  for f in skintokens.elf usd.elf motion.elf godot-riscv.gdextension AutoRig.gd UsdImport.gd Motion.gd Bintr.gd clips.tsv walk.f32; do
     grep -aq "$f" "$out/skintokens-viewer.pck" || { echo "pck lacks $f"; exit 1; }
   done
   echo "PCK-OK $(wc -c < "$out/skintokens-viewer.pck") bytes"
@@ -79,6 +82,9 @@ lay() { # <os> <runtime> <exe suffix> <library>
   for f in $weights; do
     mkdir -p "$d/w/$(dirname "$f")" && cp "$w/$f" "$d/w/$f"
   done
+  if [ -n "${BINTR:-}" ]; then
+    mkdir -p "$d/bintr" && cp "$BINTR/$1"/bintr-* "$d/bintr/"
+  fi
 }
 lay macos godot.macos.template_release.double.arm64 "" \
   libgodot_riscv.macos.template_release.double.universal.framework

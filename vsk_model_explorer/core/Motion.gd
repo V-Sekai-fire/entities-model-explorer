@@ -10,6 +10,7 @@ extends Node
 
 signal made(path: String, clip: String)
 
+const Bintr = preload("res://vsk_model_explorer/core/Bintr.gd")
 const CLIPS := "res://motion/clips.tsv"
 const MOTION_ELF := "res://motion.elf"
 const RIG_ELF := "res://skintokens.elf"
@@ -198,13 +199,7 @@ func run(clip: Array) -> String:
 
 
 func _sandbox(elf: String, needs: String) -> Node:
-	var sb: Node = ClassDB.instantiate("Sandbox")
-	sb.memory_max = 2048
-	sb.references_max = 65536
-	sb.allocations_max = 10000000
-	sb.execution_timeout = 0
-	add_child(sb)
-	sb.load_buffer(FileAccess.get_file_as_bytes(elf))
+	var sb: Node = Bintr.make(self, elf, 2048, 65536)
 	if not sb.has_function(needs):
 		_free(sb)
 		return null

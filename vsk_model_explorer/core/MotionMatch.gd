@@ -954,12 +954,11 @@ func _process(delta: float) -> void:
 		var hw := (_skeleton.global_transform * _skeleton.get_bone_global_pose(hb)).origin
 		print(
 			(
-				"MOVE-TRACE %d %s t=%.3f pos=%.3f hips=%.3f,%.3f char=%.3f,%.3f"
+				"MOVE-TRACE %d %s t=%.3f hips=%.3f,%.3f char=%.3f,%.3f"
 				% [
 					Engine.get_process_frames(),
-					name,
-					t,
-					_player.current_animation_position,
+					_node.names[_clip] if _clip >= 0 and _clip < _node.names.size() else "",
+					_node.time,
 					hw.x,
 					hw.z,
 					char_scene.x,

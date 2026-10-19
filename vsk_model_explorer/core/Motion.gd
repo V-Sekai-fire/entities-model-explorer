@@ -199,7 +199,8 @@ func run(clip: Array) -> String:
 
 
 func _sandbox(elf: String, needs: String) -> Node:
-	var sb: Node = Bintr.make(self, elf, 2048, 65536)
+	# wasm32 cannot reserve 2048 MiB (std::bad_alloc): 512 on the web.
+	var sb: Node = Bintr.make(self, elf, 512 if OS.has_feature("web") else 2048, 65536)
 	if not sb.has_function(needs):
 		_free(sb)
 		return null
@@ -209,7 +210,11 @@ func _sandbox(elf: String, needs: String) -> Node:
 func _free(sb: Node) -> void:
 	if sb:
 		remove_child(sb)
-		sb.queue_free()
+		# On the web, free the arena now: a queued free kept two arenas alive at once.
+		if OS.has_feature("web"):
+			sb.free()
+		else:
+			sb.queue_free()
 
 
 # Runs the started job on `pump` to the end, answering its file reads and weight uploads.

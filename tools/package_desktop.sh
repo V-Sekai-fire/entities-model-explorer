@@ -18,6 +18,9 @@
 #   ELF      skintokens.elf
 #   USD_ELF  usd.elf (interactor-usd-guest), the OpenUSD reader for .usd, .usda, .usdc and .usdz
 #   MOTION_ELF  motion.elf (interactor-motion-guest)
+#   MM_ELF   mm.elf (interactor-motion-matching-guest), the motion-matching controller (M)
+#   MM_DATA  that repo's data/kimodo-locomotion: one dir per clip (transforms.f32, skeleton.txt,
+#            parents.txt), the controller's pose database; written into res://motion/mm/
 #   NOTICES  dir with LICENSE.md, NOTICE and CITATION.cff for the viewer, as written by
 #            tools/licences/licgen.py and published in its HF download repo
 #            (chibifire/interactor-skintokens-viewer or chibifire/interactor-kimodo-motion-viewer).
@@ -57,11 +60,22 @@ E
   cp "$ELF" "$src/skintokens.elf"
   cp "$USD_ELF" "$src/usd.elf"
   cp "$MOTION_ELF" "$src/motion.elf"
+  cp "$MM_ELF" "$src/mm.elf"
+  mkdir -p "$src/motion/mm"
+  first=""
+  for d in "$MM_DATA"/*/; do
+    k=$(basename "$d")
+    cp "$d/transforms.f32" "$src/motion/mm/$k.f32"
+    echo "$k" >> "$src/motion/mm/clips.tsv"
+    [ -n "$first" ] || first=$d
+  done
+  sed -n '4,$p' "$first/skeleton.txt" > "$src/motion/mm/skeleton.txt"
+  cp "$first/parents.txt" "$src/motion/mm/parents.txt"
   G="$ENGINE/godot.macos.editor.double.arm64"
   "$G" --headless --path "$src" --import > "$out/import.log" 2>&1 || true
   "$G" --headless --path "$src" --export-pack Linux "$out/skintokens-viewer.pck" > "$out/export.log" 2>&1
   if grep -q "SCRIPT ERROR" "$out/export.log"; then echo "SCRIPT ERROR in export.log"; exit 1; fi
-  for f in skintokens.elf usd.elf motion.elf godot-riscv.gdextension AutoRig.gd UsdImport.gd Motion.gd Bintr.gd clips.tsv walk.f32; do
+  for f in skintokens.elf usd.elf motion.elf mm.elf godot-riscv.gdextension AutoRig.gd UsdImport.gd Motion.gd MotionMatch.gd Bintr.gd clips.tsv walk.f32 mm/skeleton.txt; do
     grep -aq "$f" "$out/skintokens-viewer.pck" || { echo "pck lacks $f"; exit 1; }
   done
   echo "PCK-OK $(wc -c < "$out/skintokens-viewer.pck") bytes"

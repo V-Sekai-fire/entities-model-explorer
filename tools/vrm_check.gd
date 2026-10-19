@@ -35,7 +35,11 @@ func _initialize() -> void:
 	var skel: Skeleton3D = scene.find_children("*", "Skeleton3D", true, false)[0]
 	var g := func(n: String) -> Vector3:
 		var i := skel.find_bone(n)
-		return VrmExport._to_root(skel, scene) * skel.get_bone_global_rest(i).origin if i >= 0 else Vector3.INF
+		return (
+			VrmExport._to_root(skel, scene) * skel.get_bone_global_rest(i).origin
+			if i >= 0
+			else Vector3.INF
+		)
 	var mtoon := 0
 	for mi in scene.find_children("*", "MeshInstance3D", true, false):
 		for s in mi.mesh.get_surface_count():
@@ -45,18 +49,31 @@ func _initialize() -> void:
 			if m is ShaderMaterial and m.shader.resource_path.get_file().begins_with("mtoon"):
 				mtoon += 1
 			else:
-				print("VRM-READBACK material ", m, " ", m.shader.resource_path if m is ShaderMaterial else "")
+				print(
+					"VRM-READBACK material ",
+					m,
+					" ",
+					m.shader.resource_path if m is ShaderMaterial else ""
+				)
 	var arm := func(side: String) -> float:
 		var d: Vector3 = g.call(side + "LowerArm") - g.call(side + "UpperArm")
 		return rad_to_deg(atan2(-d.y, Vector2(d.x, d.z).length()))
 	print(
-		"VRM-READBACK meta=%s skel_bones=%d mtoon_surfaces=%d left_x=%.3f right_x=%.3f toe_dz=%.3f head_y=%.3f hips_y=%.3f arm_drop_L=%.1f arm_drop_R=%.1f"
-		% [
-			scene.get("vrm_meta") != null, skel.get_bone_count(), mtoon,
-			g.call("LeftUpperLeg").x, g.call("RightUpperLeg").x,
-			(g.call("LeftToes") - g.call("LeftFoot")).z, g.call("Head").y, g.call("Hips").y,
-			arm.call("Left"), arm.call("Right"),
-		]
+		(
+			"VRM-READBACK meta=%s skel_bones=%d mtoon_surfaces=%d left_x=%.3f right_x=%.3f toe_dz=%.3f head_y=%.3f hips_y=%.3f arm_drop_L=%.1f arm_drop_R=%.1f"
+			% [
+				scene.get("vrm_meta") != null,
+				skel.get_bone_count(),
+				mtoon,
+				g.call("LeftUpperLeg").x,
+				g.call("RightUpperLeg").x,
+				(g.call("LeftToes") - g.call("LeftFoot")).z,
+				g.call("Head").y,
+				g.call("Hips").y,
+				arm.call("Left"),
+				arm.call("Right"),
+			]
+		)
 	)
 	scene.free()
 	for e in exts:

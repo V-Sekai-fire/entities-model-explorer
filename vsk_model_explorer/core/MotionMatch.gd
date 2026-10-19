@@ -388,7 +388,9 @@ func _keys_go_to_walk_mode() -> bool:
 		k.physical_keycode = KEY_C
 		k.pressed = pressed
 		Input.parse_input_event(k)
-	await get_tree().process_frame
+	# Parsed events reach the viewport when Input flushes them, a frame or two later.
+	for i in 3:
+		await get_tree().process_frame
 	var ok: bool = _last_walk_key == KEY_C and (chart == null or chart.visible == shown)
 	_mode = STAND
 	if ok:

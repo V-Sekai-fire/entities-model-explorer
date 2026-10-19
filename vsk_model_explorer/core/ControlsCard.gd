@@ -27,7 +27,7 @@ const ROWS := [
 	["keys", ["E"], "E", "Explode"],
 	["keys", ["G"], "G", "Hide grid"],
 	["keys", ["Esc"], "Esc", "Close a popup"],
-	["file", "", "Drop a file", ".glb .gltf .vrm"],
+	["file", "", "Drop a file", ".glb .gltf .vrm .usd"],
 ]
 
 var font: Font

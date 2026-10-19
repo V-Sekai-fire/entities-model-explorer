@@ -17,6 +17,8 @@ const USD_EXTENSIONS := ["usd", "usda", "usdc", "usdz"]
 var auto_rig: Node
 const Motion = preload("res://vsk_model_explorer/core/Motion.gd")
 var motion: Node
+const Flex = preload("res://vsk_model_explorer/core/Flex.gd")
+var flex: Node
 # The clip the motion step just added: the animation list plays it once the file reopens.
 var play_after_load := ""
 
@@ -37,6 +39,10 @@ func _ready():
 	get_viewport().files_dropped.connect(_on_file_dropped)
 	# The controls card, bottom right on top of the 3D view; H shows or hides it.
 	_ensure_controls_card()
+	# F plays the 20-minute flex motion on the open model (every build, web too).
+	flex = Flex.new()
+	add_child(flex)
+	add_control_row(["keys", ["F"], "F", "Flex 20 min"])
 	if not OS.has_feature("web"):
 		# One pck, two desktop viewers: each feature is on when its weights are in the w folder.
 		# SkinTokens ships the rig weights; Kimodo motion ships the Kimodo weights.

@@ -12,7 +12,7 @@ talk	loop	4.0	A person stands and talks, gesturing with both hands.
 dance	loop	4.0	A person dances to the beat in place.
 jump	once	1.2	A person jumps up in place and lands.
 wave	once	2.0	A person waves with the right hand.
-clap	once	2.0	A person claps their hands.
+clap	once	2.0	A person standing still raises both hands, claps three times, then lowers the hands and stands still.
 bow	once	2.0	A person takes a bow.
 sit_down	once	2.0	A person sits down on a chair.
 stand_up	once	2.0	A person stands up from a chair.

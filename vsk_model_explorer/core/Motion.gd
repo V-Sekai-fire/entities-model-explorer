@@ -135,7 +135,8 @@ func run(clip: Array) -> String:
 	if emb.size() != 4096 * 4:
 		return _fail("no text input for %s" % key)
 	_motion.vmcall("motion_prompt_embedding", clip[3], emb.to_float32_array())
-	var made_s: float = 6.0 if clip[1] == "loop" else 3.0
+	# 6 s for every clip: at 3 s a one-shot such as wave has no time to come back to its start pose.
+	var made_s := 6.0
 	var q := str(_motion.vmcall("motion_generate", "kimodo_soma", clip[3], made_s, SEED))
 	if not q.begins_with("QUEUED"):
 		return _fail(q)

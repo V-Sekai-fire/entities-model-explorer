@@ -957,6 +957,10 @@ func _run_test() -> void:
 		var kind_all := 0.0
 		var air := 0.0
 		var jumped := false
+		# The body must not leap: the hips may move at most twice the run speed in a frame (a clip
+		# switch used to throw them metres toward where the old clip was, then back).
+		var hips_prev := _hips_world()
+		var leap := 0.0
 		# Judge the second half of each step: the first half is the change of direction.
 		var p0 := _last_world
 		while t < step[3]:
@@ -965,6 +969,10 @@ func _run_test() -> void:
 			t += dt
 			seen[_keys[_clip]] = true
 			jumped = jumped or _jumping
+			var hw := _hips_world()
+			var step_m := Vector2(hw.x - hips_prev.x, hw.z - hips_prev.z).length()
+			leap = max(leap, step_m / max(dt, 1e-4) / (_run_speed * _scale))
+			hips_prev = hw
 			if _kind == 4:
 				air += dt
 			if t < step[3] * 0.5:
@@ -1003,15 +1011,17 @@ func _run_test() -> void:
 			good = jumped and air > 0.1
 		elif step[5] != STAND:
 			good = good and share >= 0.7
+		good = good and leap < 2.0
 		print(
 			(
-				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f facing_off=%.0f kind_share=%.2f air=%.2f clips=%s %s"
+				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f facing_off=%.0f leap=%.2f kind_share=%.2f air=%.2f clips=%s %s"
 				% [
 					step[0],
 					speed,
 					want,
 					heading,
 					face_off,
+					leap,
 					share,
 					air,
 					",".join(seen.keys()),
@@ -1091,6 +1101,11 @@ func _test_tap(name: String, run: bool) -> float:
 		)
 	)
 	return arrived if good else -1.0
+
+
+func _hips_world() -> Vector3:
+	var b := _skeleton.find_bone(_hips_path.get_slice(":", 1))
+	return (_skeleton.global_transform * _skeleton.get_bone_global_pose(b)).origin
 
 
 # Walk keys go to the walk only: with the Loop toggle focused, Space jumps and does not flip the

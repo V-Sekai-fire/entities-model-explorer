@@ -10,6 +10,7 @@
 #   SANDBOX  dir with the godot-sandbox native libraries (CI artifacts of the add-on's main),
 #            named libgodot_riscv.<os>.template_release.double.<arch>[.so|.dll|.framework]
 #   ELF      skintokens.elf
+#   USD_ELF  usd.elf (interactor-usd-guest), the OpenUSD reader for .usd, .usda, .usdc and .usdz
 # <w> holds mesh-encoder.gguf, skin-vae.gguf and tokenrig.gguf.
 # The pck is OS-independent; `package` runs anywhere with zip and tar (the Windows desk's WSL is
 # fastest for the 1.3 GB archives). Archives store the weights uncompressed (zip -0 for .gguf).
@@ -36,11 +37,12 @@ windows.double.x86_64 = "./libgodot_riscv.windows.template_release.double.x86_64
 linux.double.x86_64 = "./libgodot_riscv.linux.template_release.double.x86_64.so"
 E
   cp "$ELF" "$src/skintokens.elf"
+  cp "$USD_ELF" "$src/usd.elf"
   G="$ENGINE/godot.macos.editor.double.arm64"
   "$G" --headless --path "$src" --import > "$out/import.log" 2>&1 || true
   "$G" --headless --path "$src" --export-pack Linux "$out/skintokens-viewer.pck" > "$out/export.log" 2>&1
   if grep -q "SCRIPT ERROR" "$out/export.log"; then echo "SCRIPT ERROR in export.log"; exit 1; fi
-  for f in skintokens.elf godot-riscv.gdextension AutoRig.gd; do
+  for f in skintokens.elf usd.elf godot-riscv.gdextension AutoRig.gd UsdImport.gd; do
     grep -aq "$f" "$out/skintokens-viewer.pck" || { echo "pck lacks $f"; exit 1; }
   done
   echo "PCK-OK $(wc -c < "$out/skintokens-viewer.pck") bytes"

@@ -11,6 +11,8 @@ var worker: Worker
 const gltf_vrm_extension_const = preload("res://addons/vrm/vrm_extension.gd")
 const ControlsCard = preload("res://vsk_model_explorer/core/ControlsCard.gd")
 const AutoRig = preload("res://vsk_model_explorer/core/AutoRig.gd")
+const UsdImport = preload("res://vsk_model_explorer/core/UsdImport.gd")
+const USD_EXTENSIONS := ["usd", "usda", "usdc", "usdz"]
 var auto_rig: Node
 
 var gltf_doc = GLTFDocument.new()
@@ -67,7 +69,7 @@ func _check_command_line_args():
 		# Verify the file exists and has a supported extension
 		if FileAccess.file_exists(file_path):
 			var ext = file_path.get_extension().to_lower()
-			if ext == "glb" or ext == "gltf" or ext == "vrm" or ext == "fbx":
+			if ext in ["glb", "gltf", "vrm", "fbx"] or ext in USD_EXTENSIONS:
 				_load_file(file_path)
 				break
 
@@ -91,6 +93,20 @@ func _load_file(file_path: String):
 	var ext = normalized_path.get_extension().to_lower()
 	if auto_rig:
 		auto_rig.source = normalized_path
+		auto_rig.output_base = ""
+
+	if ext in USD_EXTENSIONS:
+		# OpenUSD (usd.elf) makes a GLB in the user folder; the viewer opens it, and the auto-rig
+		# reads it and saves its result beside the USD file.
+		var glb := _usd_to_glb(normalized_path)
+		if glb == "":
+			gltf_is_loaded.emit(false, null)
+			return
+		if auto_rig:
+			auto_rig.source = glb
+			auto_rig.output_base = normalized_path.get_basename()
+		normalized_path = glb
+		ext = "glb"
 
 	if ext == "glb" or ext == "gltf" or ext == "vrm":
 		gltf_start_to_load.emit()
@@ -149,6 +165,23 @@ func _load_file(file_path: String):
 		fbx_start_to_load.emit()
 	else:
 		printerr("Unsupported file format: ", ext)
+
+
+func _usd_to_glb(path: String) -> String:
+	var dir := OS.get_user_data_dir().path_join("usd")
+	DirAccess.make_dir_recursive_absolute(dir)
+	var out := dir.path_join(path.get_file().get_basename() + ".glb")
+	var usd := UsdImport.new()
+	add_child(usd)
+	var why := usd.to_glb(path, out)
+	usd.queue_free()
+	if why != "":
+		printerr("USD-FAIL ", why)
+		if auto_rig:
+			auto_rig.show_status(why)
+		return ""
+	print("USD-OK %s -> %s" % [path, out])
+	return out
 
 
 func _emit_fbx_load(fbx) -> void:

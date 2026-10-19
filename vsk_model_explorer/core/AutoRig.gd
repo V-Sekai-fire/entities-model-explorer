@@ -5,6 +5,8 @@ extends Node
 # file as <name>.rigged.glb, or in the user folder if that one is read-only.
 # A .vrm keeps its own skeleton: R saves it as VRM 1.0 (godot-vrm), puts it in a T-pose from any
 # pose and turns each joint's +Y along its bone (skintokens.elf, no weights), as <name>.tpose.vrm.
+# An opened .usd, .usda, .usdc or .usdz file is rigged from the GLB the viewer made of it
+# (UsdImport.gd), and the result is <name>.rigged.glb beside the USD file.
 # Test mode: `-- <file.glb> --auto-rig-quit` rigs the file once it is open, opens the result,
 # then quits with 0, or with 1 on any failure.
 
@@ -31,6 +33,9 @@ const VRM_EXTENSIONS := [
 ]
 
 var source := ""
+# Where the result goes, without the extension; "" = beside `source`. An opened USD file is rigged
+# from its GLB in the user folder, but its result goes beside the USD file.
+var output_base := ""
 var busy := false
 var _sb: Node
 var _rd: RenderingDevice
@@ -157,10 +162,11 @@ func run(mesh: String) -> String:
 	if glb.is_empty():
 		return ""
 	cleanup()
-	var out := mesh.get_basename() + ".rigged.glb"
+	var base := output_base if output_base != "" else mesh.get_basename()
+	var out := base + ".rigged.glb"
 	var f := FileAccess.open(out, FileAccess.WRITE)
 	if f == null:
-		out = OS.get_user_data_dir().path_join(mesh.get_file().get_basename() + ".rigged.glb")
+		out = OS.get_user_data_dir().path_join(base.get_file() + ".rigged.glb")
 		f = FileAccess.open(out, FileAccess.WRITE)
 	if f == null:
 		return fail("cannot save the result")

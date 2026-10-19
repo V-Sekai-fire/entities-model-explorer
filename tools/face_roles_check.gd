@@ -43,11 +43,25 @@ func check() -> int:
 			mesh = (n as MeshInstance3D).mesh
 	if mesh == null:
 		for n in root.find_children("*", "MeshInstance3D", true, false):
-			print("mesh ", n.name, " ", (n as MeshInstance3D).mesh.resource_name, " surfaces ", (n as MeshInstance3D).mesh.get_surface_count())
+			print(
+				"mesh ",
+				n.name,
+				" ",
+				(n as MeshInstance3D).mesh.resource_name,
+				" surfaces ",
+				(n as MeshInstance3D).mesh.get_surface_count()
+			)
 		print("FACE-ROLES FAIL no mesh ", a[1])
 		return 2
 	for s in mesh.get_surface_count():
-		print("surface ", s, " ", FaceRoles.surface_name(mesh, s), " -> ", FaceRoles.role_of(FaceRoles.surface_name(mesh, s)))
+		print(
+			"surface ",
+			s,
+			" ",
+			FaceRoles.surface_name(mesh, s),
+			" -> ",
+			FaceRoles.role_of(FaceRoles.surface_name(mesh, s))
+		)
 	var got := FaceRoles.roles(mesh)
 	if a.size() > 4 and a[4] == "control":
 		for i in got.size():
@@ -94,6 +108,10 @@ func check() -> int:
 		cg[got[i]] += 1
 		cw[want[i]] += 1
 	var agree := float(same) / float(got.size())
-	print("FACE-ROLES %s agreement %.4f (%d of %d) roles skin/eye/lash/iris/brow got %s reference %s" % [
-			"PASS" if agree >= 0.99 else "FAIL", agree, same, got.size(), str(cg), str(cw)])
+	print(
+		(
+			"FACE-ROLES %s agreement %.4f (%d of %d) roles skin/eye/lash/iris/brow got %s reference %s"
+			% ["PASS" if agree >= 0.99 else "FAIL", agree, same, got.size(), str(cg), str(cw)]
+		)
+	)
 	return 0 if agree >= 0.99 else 1

@@ -73,10 +73,10 @@ PARTS = [
     ("[nlohmann/json](" + GH + "nlohmann/json)", "inside `skintokens.elf`", "MIT", "nlohmann/json",
      "JSON for Modern C++", None),
     ("[interactor-headfit](" + GH + "V-Sekai-fire/interactor-headfit) (eye-close shapes `headfit.elf`)",
-     "in `{pck}`", "MIT", "interactor-headfit", "interactor-headfit", None),
+     "`headfit.elf` in `{pck}`", "MIT", "interactor-headfit", "interactor-headfit", None),
     ("[interactor-motion-matching-guest](" + GH + "V-Sekai-fire/interactor-motion-matching-guest) (walk mode "
      "`mm.elf`, a port of [godot-motion-matching](" + GH + "V-Sekai/godot-motion-matching) by Guilherme Sousa)",
-     "in `{pck}`", "MIT", "interactor-motion-matching-guest", "interactor-motion-matching-guest", None),
+     "`mm.elf` in `{pck}`", "MIT", "interactor-motion-matching-guest", "interactor-motion-matching-guest", None),
     ("Walk-mode clips from the [O3DE MotionMatching gem](" + GH + "o3de/o3de/tree/development/Gems/MotionMatching) "
      "(motion capture, moved onto the SOMA skeleton)",
      "`motion/mm/*.f32` in `{pck}`", "Apache-2.0 OR MIT (used here under MIT)",

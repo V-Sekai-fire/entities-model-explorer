@@ -8,7 +8,11 @@
 # whole (numbers at Godot's 15 significant digits).
 #
 # The face mesh is the one whose materials name both skin and an eye (FaceRoles); a mesh that is
-# all eye (an iris on its own mesh) is never the face. VRM 1.0 faces +Z with the avatar's left on
+# all eye (an iris on its own mesh), or has eye vertices on one side only, is never the face. A vertex whose strongest joint is the
+# humanoid leftEye or rightEye (or a bone under it) is an iris whatever its material says (unless
+# lash or brow): it turns with the eye, so the lids close over it. That finds the eyes of a face
+# whose materials name no lash or iris (an avatar's own closes, as the answer key: the bones give
+# 0.587 on one with only an "eye" material, and change nothing where the names are complete). VRM 1.0 faces +Z with the avatar's left on
 # +X; headfit's frame is Z up, -Y forward, left +X: (x, y, z) -> (x, -z, y).
 class_name FaceBlink
 extends RefCounted
@@ -243,15 +247,7 @@ func _face() -> Dictionary:
 				tri.append(base + idx[k])
 				tri.append(base + idx[k + 1])
 				tri.append(base + idx[k + 2])
-		var eye := 0
-		var skin := 0
-		for r in roles:
-			eye += 1 if r == FaceRoles.EYE or r == FaceRoles.LASH else 0
-			skin += 1 if r == FaceRoles.SKIN else 0
-		if eye == 0 or skin == 0 or (not best.is_empty() and eye <= best.eye):
-			continue
-		for i in roles.size():
-			roles[i] = maxi(roles[i], FaceRoles.SKIN)
+		_eye_bone_roles(ni, mesh, first, roles)
 		var xyz := PackedFloat32Array()
 		for a in accs:
 			var p := _vec3(a)
@@ -260,6 +256,29 @@ func _face() -> Dictionary:
 			for v in p:
 				var w := to_model * v
 				xyz.append_array([w.x, -w.z, w.y])
+		# Eye vertices on both sides of the middle: a body mesh carrying one eye's material is not
+		# the face.
+		var eye := 0
+		var skin := 0
+		var left := 0
+		var right := 0
+		for i in roles.size():
+			var r := roles[i]
+			if r == FaceRoles.EYE or r == FaceRoles.LASH or r == FaceRoles.IRIS:
+				eye += 1
+				if i * 3 < xyz.size():
+					left += 1 if xyz[i * 3] > 0.0 else 0
+					right += 1 if xyz[i * 3] < 0.0 else 0
+			skin += 1 if r == FaceRoles.SKIN else 0
+		if eye == 0 or skin == 0 or left == 0 or right == 0:
+			continue
+		# The face holds the lids: the most skin vertices touching the eyes. Kimono's body mesh
+		# has eyeballs behind the face but no lids (186 such vertices against the face's 792).
+		var lids := _skin_near_eyes(roles, xyz)
+		if lids == 0 or (not best.is_empty() and lids <= best.eye):
+			continue
+		for i in roles.size():
+			roles[i] = maxi(roles[i], FaceRoles.SKIN)
 		if ok:
 			best = {
 				"node": ni,
@@ -268,10 +287,126 @@ func _face() -> Dictionary:
 				"roles": roles,
 				"xyz": xyz,
 				"tri": tri,
-				"eye": eye,
+				"eye": lids,
 				"back": to_model.basis.inverse(),
 			}
 	return best
+
+
+# Skin vertices within a tenth of an eye's width (half the eyes' span in x) of an eye vertex.
+static func _skin_near_eyes(roles: PackedInt32Array, xyz: PackedFloat32Array) -> int:
+	var lo := INF
+	var hi := -INF
+	var eyes := []
+	for i in roles.size():
+		var r := roles[i]
+		if (
+			(r == FaceRoles.EYE or r == FaceRoles.LASH or r == FaceRoles.IRIS)
+			and i * 3 + 2 < xyz.size()
+		):
+			eyes.append(i)
+			lo = minf(lo, xyz[i * 3])
+			hi = maxf(hi, xyz[i * 3])
+	var reach := (hi - lo) * 0.5 * 0.1
+	if eyes.is_empty() or reach <= 0.0:
+		return 0
+	var at := func(i: int) -> Vector3: return Vector3(xyz[i * 3], xyz[i * 3 + 1], xyz[i * 3 + 2])
+	var grid := {}
+	for i: int in eyes:
+		var c := Vector3i((at.call(i) / reach).floor())
+		if not grid.has(c):
+			grid[c] = []
+		grid[c].append(i)
+	var n := 0
+	for i in roles.size():
+		if roles[i] != FaceRoles.SKIN or i * 3 + 2 >= xyz.size():
+			continue
+		var p: Vector3 = at.call(i)
+		var c := Vector3i((p / reach).floor())
+		var near := false
+		for dx in range(-1, 2):
+			for dy in range(-1, 2):
+				for dz in range(-1, 2):
+					for j: int in grid.get(c + Vector3i(dx, dy, dz), []):
+						if not near and p.distance_to(at.call(j)) < reach:
+							near = true
+		n += 1 if near else 0
+	return n
+
+
+# The skin joints of node `ni` that are the humanoid eyes or bones under them.
+func _eye_joints(ni: int) -> Dictionary:
+	var out := {}
+	var node: Dictionary = _json.nodes[ni]
+	if not node.has("skin"):
+		return out
+	var bones: Dictionary = _json.extensions.VRMC_vrm.get("humanoid", {}).get("humanBones", {})
+	var todo := []
+	for b in ["leftEye", "rightEye"]:
+		if bones.has(b):
+			todo.append(int(bones[b].node))
+	var under := {}
+	while not todo.is_empty():
+		var n: int = todo.pop_back()
+		under[n] = true
+		for c in _json.nodes[n].get("children", []):
+			todo.append(int(c))
+	var joints: Array = _json.skins[int(node.skin)].joints
+	for j in joints.size():
+		if under.has(int(joints[j])):
+			out[j] = true
+	return out
+
+
+# Marks as IRIS the skin or eye vertices whose strongest joint is an eye (see the header).
+func _eye_bone_roles(ni: int, mesh: Dictionary, first: Dictionary, roles: PackedInt32Array) -> void:
+	var eyes := _eye_joints(ni)
+	if eyes.is_empty():
+		return
+	var done := {}
+	for prim in mesh.primitives:
+		var a := int(prim.attributes.POSITION)
+		if (
+			done.has(a)
+			or not prim.attributes.has("JOINTS_0")
+			or not prim.attributes.has("WEIGHTS_0")
+		):
+			continue
+		done[a] = true
+		var j := _vec4(int(prim.attributes.JOINTS_0))
+		var w := _vec4(int(prim.attributes.WEIGHTS_0))
+		var base: int = first[a]
+		for i in mini(j.size(), w.size()) / 4:
+			var k := 0
+			for c in range(1, 4):
+				if w[i * 4 + c] > w[i * 4 + k]:
+					k = c
+			var r := roles[base + i]
+			if w[i * 4 + k] > 0.0 and eyes.has(int(j[i * 4 + k])):
+				if r == FaceRoles.SKIN or r == FaceRoles.EYE:
+					roles[base + i] = FaceRoles.IRIS
+
+
+# A VEC4 accessor as floats (joints as their indices, normalized weights scaled to 0..1).
+func _vec4(a: int) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	var v := _view(a)
+	if v.is_empty() or v[2].type != "VEC4":
+		return out
+	var ct := int(v[2].componentType)
+	var size := 1 if ct == 5121 else (2 if ct == 5123 else 4)
+	var stride: int = v[1] if v[1] > 0 else size * 4
+	var norm: bool = v[2].get("normalized", false) and ct != 5126
+	for i in int(v[2].count):
+		for c in 4:
+			var o: int = v[0] + i * stride + c * size
+			var x: float = (
+				_bin.decode_float(o)
+				if ct == 5126
+				else float(_bin[o] if ct == 5121 else _bin.decode_u16(o))
+			)
+			out.append(x / (255.0 if ct == 5121 else 65535.0) if norm else x)
+	return out
 
 
 # Mesh space to the model's space (+Z forward, +Y up, left +X): the node's world transform.

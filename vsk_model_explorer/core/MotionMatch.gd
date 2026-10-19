@@ -111,7 +111,7 @@ func say(text: String) -> void:
 		_last_status = text
 	if status.is_valid():
 		status.call(text)
-	if _test and text.begins_with("Move failed"):
+	if _test and (text.begins_with("Move failed") or text.begins_with("Motion failed")):
 		printerr("MOVE-FAIL ", text)
 
 

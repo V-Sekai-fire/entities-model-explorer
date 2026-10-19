@@ -37,6 +37,11 @@ const MODE_NAMES := ["standing", "crouching", "crawling"]
 # The model stops within ARRIVE SOMA metres of the point.
 const TAP_SLOP := 12.0
 const ARRIVE := 0.3
+# mm.elf's velocity spring (mm_core Settings.halflife): after the asked speed drops to zero the
+# body still travels speed * SPRING_HALFLIFE / ln 2. Walking to a point eases the asked speed
+# down over that distance on a makima curve, which bends without going past its keys.
+const SPRING_HALFLIFE := 0.27
+var _approach: Animation
 # The controls card rows this adds; the status line repeats them while walking.
 # Keyboard and gamepad on one row each.
 const CARD_ROWS := [
@@ -606,6 +611,25 @@ func _prepare_clips() -> bool:
 	return true
 
 
+# Share of full speed to ask for with dist scene metres left to the point: 0 at the arrive
+# ring, 1 once the point is two stopping distances out (keys at 0, 1 and 2 stopping distances).
+func _approach_share(dist: float) -> float:
+	if _approach == null:
+		_approach = Animation.new()
+		var t := _approach.add_track(Animation.TYPE_VALUE)
+		var it := interpolation()
+		_approach.track_set_interpolation_type(
+			t, it if it != Animation.INTERPOLATION_CUBIC else Animation.INTERPOLATION_LINEAR
+		)
+		for k in [[0.0, 0.0], [1.0, 1.0], [2.0, 1.0]]:
+			_approach.track_insert_key(t, k[0], k[1])
+		_approach.length = 2.0
+	var top: float = _run_speed if _target_run else _walk_speed
+	var stop_m := top * _scale * SPRING_HALFLIFE / log(2.0)
+	var x: float = clamp((dist - ARRIVE * _scale) / max(stop_m, 1e-6), 0.0, 2.0)
+	return clamp(float(_approach.value_track_interpolate(0, x)), 0.0, 1.0)
+
+
 # Godot's makima track interpolation (engines from 2026-09-29 on); cubic on an older engine.
 static func interpolation() -> Animation.InterpolationType:
 	if ClassDB.class_has_integer_constant("Animation", "INTERPOLATION_MAKIMA"):
@@ -956,6 +980,7 @@ func _process(delta: float) -> void:
 	# The right stick turns the camera.
 	# Walk to the tapped point unless a move key or the stick takes over.
 	var steer := Vector3.ZERO
+	var brake := 1.0
 	if input != Vector2.ZERO:
 		_clear_target()
 	elif _has_target:
@@ -966,6 +991,7 @@ func _process(delta: float) -> void:
 		else:
 			steer = to.normalized()
 			running = running or _target_run
+			brake = _approach_share(to.length())
 	var cc0 := get_parent().get_node_or_null("CamController") as Node3D
 	var rx := Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
 	if cc0 and abs(rx) > 0.2 and not _test:
@@ -975,6 +1001,7 @@ func _process(delta: float) -> void:
 		_mode_speed[_mode] if _mode != STAND else (_run_speed if running else _walk_speed)
 	)
 	var speed := base * _scale * (1.0 if steer != Vector3.ZERO else input.length())
+	speed *= brake
 	# Camera-relative input in the scene: forward is away from the camera, on the floor.
 	var cam := get_viewport().get_camera_3d()
 	var fwd := Vector3(0, 0, -1)
@@ -1116,6 +1143,7 @@ func _run_test() -> void:
 		var leap := 0.0
 		# Judge the second half of each step: the first half is the change of direction.
 		var p0 := _last_world
+		var faces: Array[Vector2] = []
 		while t < step[3]:
 			await get_tree().process_frame
 			var dt := get_process_delta_time()
@@ -1139,6 +1167,8 @@ func _run_test() -> void:
 			else:
 				kind_all += dt
 				kind_ok += dt if _kind == step[5] else 0.0
+				var f := _hips_forward()
+				faces.append(Vector2(f.x, f.z).normalized() * dt)
 		var moved: Vector3 = _last_world - p0
 		var secs: float = step[3] * 0.5
 		var speed: float = Vector2(moved.x, moved.z).length() / secs
@@ -1157,10 +1187,18 @@ func _run_test() -> void:
 		# Facing: the model's own forward (rest +Z turned by the scene) against the way it went.
 		# The hips carry the clip's own turn (root motion moves only the floor travel), so read
 		# the forward off the posed hips: the rest forward in the hips' frame, turned by the pose.
-		var face := _hips_forward()
+		# A stride swings the hips, so one frame depends on where the frame falls in the stride:
+		# judge the time-weighted mean over the judged half, and print the worst frame as well.
+		var mean_face := Vector2.ZERO
+		var face_worst := 0.0
+		var way := Vector2(moved.x, moved.z)
+		for f in faces:
+			mean_face += f
+			if way.length() > 0.01 and f.length() > 0.0:
+				face_worst = max(face_worst, abs(rad_to_deg(way.angle_to(f))))
 		var face_off: float = (
-			rad_to_deg(Vector2(moved.x, moved.z).angle_to(Vector2(face.x, face.z)))
-			if moved.length() > 0.01
+			rad_to_deg(way.angle_to(mean_face))
+			if moved.length() > 0.01 and mean_face.length() > 0.0
 			else 0.0
 		)
 		var off: float = abs(wrapf(heading - step[4], -180.0, 180.0))
@@ -1183,13 +1221,14 @@ func _run_test() -> void:
 		good = good and measured > 0 and pose_err < 0.02 and hips_off < 0.01 * _scale and leap < 1.5
 		print(
 			(
-				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f facing_off=%.0f leap=%.2f kind_share=%.2f air=%.2f pose_err=%.4f hips_off=%.4f clips=%s %s"
+				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f facing_off=%.0f facing_worst=%.0f leap=%.2f kind_share=%.2f air=%.2f pose_err=%.4f hips_off=%.4f clips=%s %s"
 				% [
 					step[0],
 					speed,
 					want,
 					heading,
 					face_off,
+					face_worst,
 					leap,
 					share,
 					air,

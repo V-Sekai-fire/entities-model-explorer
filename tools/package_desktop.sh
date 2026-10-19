@@ -18,6 +18,10 @@
 #   ELF      skintokens.elf
 #   USD_ELF  usd.elf (interactor-usd-guest), the OpenUSD reader for .usd, .usda, .usdc and .usdz
 #   MOTION_ELF  motion.elf (interactor-motion-guest)
+#   NOTICES  dir with LICENSE.md and CITATION.cff of the viewer's HF download repo
+#            (chibifire/interactor-skintokens-viewer or chibifire/interactor-kimodo-motion-viewer).
+#            Each package gets both files at the top level: the MIT, BSD and Apache-2.0 parts
+#            require their notices to ship with the binaries. `package` stops if one is missing.
 #   BINTR    optional: dir with macos/, windows/ and linux/, each holding that OS's native
 #            translations bintr-<HASH>.dylib, .dll or .so (tools/compile_bintr.sh); a package
 #            without them runs every guest in the interpreter
@@ -71,6 +75,9 @@ esac
 for f in $weights; do
   [ -f "$w/$f" ] || { echo "missing $w/$f"; exit 1; }
 done
+for f in LICENSE.md CITATION.cff; do
+  [ -f "${NOTICES:-}/$f" ] || { echo "missing \$NOTICES/$f (from the viewer's HF download repo)"; exit 1; }
+done
 lay() { # <os> <runtime> <exe suffix> <library>
   d="$out/$variant/$1/$app"
   rm -rf "$out/$variant/$1" && mkdir -p "$d/w"
@@ -79,6 +86,7 @@ lay() { # <os> <runtime> <exe suffix> <library>
   cp "$out/skintokens-viewer.pck" "$d/$app.pck"
   cp -R "$SANDBOX/$4" "$d/"
   cp "$ENGINE/LICENSE-model-explorer.txt" "$d/"
+  cp "$NOTICES/LICENSE.md" "$NOTICES/CITATION.cff" "$d/"
   for f in $weights; do
     mkdir -p "$d/w/$(dirname "$f")" && cp "$w/$f" "$d/w/$f"
   done

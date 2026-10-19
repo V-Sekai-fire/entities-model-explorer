@@ -575,8 +575,12 @@ func _run_test() -> void:
 		var heading: float = rad_to_deg(atan2(moved.x, -moved.z))
 		var off: float = abs(wrapf(heading - step[4], -180.0, 180.0))
 		var share: float = kind_ok / kind_all if kind_all > 0.0 else 0.0
+		# Too fast fails too: a controller step that does not follow the frame time overshoots
+		# at high frame rates (seen: 5.0 for 1.76 on Windows with no vsync).
 		var good: bool = (
-			speed < 0.2 * _scale if want == 0.0 else (speed > 0.6 * want and off < 25.0)
+			speed < 0.2 * _scale
+			if want == 0.0
+			else (speed > 0.6 * want and speed < 1.25 * want and off < 25.0)
 		)
 		if step[6]:
 			good = jumped and air > 0.1

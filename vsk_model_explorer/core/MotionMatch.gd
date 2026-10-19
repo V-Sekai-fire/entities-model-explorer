@@ -957,8 +957,8 @@ func _run_test() -> void:
 		var kind_all := 0.0
 		var air := 0.0
 		var jumped := false
-		# The body must not leap: the hips may move at most twice the run speed in a frame (a clip
-		# switch used to throw them metres toward where the old clip was, then back).
+		# The body must not leap: in one frame the hips may move at most 1.5 times what running
+		# does in the longest frame (a clip switch used to throw them metres, then back).
 		var hips_prev := _hips_world()
 		var leap := 0.0
 		# Judge the second half of each step: the first half is the change of direction.
@@ -971,7 +971,8 @@ func _run_test() -> void:
 			jumped = jumped or _jumping
 			var hw := _hips_world()
 			var step_m := Vector2(hw.x - hips_prev.x, hw.z - hips_prev.z).length()
-			leap = max(leap, step_m / max(dt, 1e-4) / (_run_speed * _scale))
+			# In units of the longest honest frame step: running for the 1/20 s frame cap.
+			leap = max(leap, step_m / (_run_speed * _scale / 20.0))
 			hips_prev = hw
 			if _kind == 4:
 				air += dt
@@ -1011,7 +1012,7 @@ func _run_test() -> void:
 			good = jumped and air > 0.1
 		elif step[5] != STAND:
 			good = good and share >= 0.7
-		good = good and leap < 2.0
+		good = good and leap < 1.5
 		print(
 			(
 				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f facing_off=%.0f leap=%.2f kind_share=%.2f air=%.2f clips=%s %s"

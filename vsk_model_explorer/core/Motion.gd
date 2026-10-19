@@ -62,6 +62,11 @@ func weights_dir() -> String:
 	return base.path_join("w")
 
 
+# The Kimodo weights are in this viewer's w folder (the SkinTokens viewer ships without them).
+func available() -> bool:
+	return FileAccess.file_exists(weights_dir().path_join(KIMODO))
+
+
 func say(text: String) -> void:
 	if status.is_valid():
 		status.call(text)

@@ -32,14 +32,30 @@ func _ready():
 	# The controls card, bottom right on top of the 3D view; H shows or hides it.
 	_ensure_controls_card()
 	if not OS.has_feature("web"):
+		# One pck, two desktop viewers: each feature is on when its weights are in the w folder.
+		# SkinTokens ships the rig weights; Kimodo motion ships the Kimodo weights.
 		auto_rig = AutoRig.new()
 		add_child(auto_rig)
 		auto_rig.rigged.connect(_load_file)
-		add_control_row(["keys", ["R"], "R", "Auto-rig a .glb"])
+		var rig_on: bool = auto_rig.available()
+		if rig_on:
+			add_control_row(["keys", ["R"], "R", "Auto-rig a .glb"])
 		motion = Motion.new()
-		add_child(motion)
-		motion.status = auto_rig.show_status
-		motion.made.connect(_on_motion_made)
+		var motion_on: bool = motion.available()
+		var args := OS.get_cmdline_user_args()
+		var motion_test := false
+		for a in args:
+			motion_test = motion_test or a.begins_with("--motion-quit=")
+		if motion_on or motion_test:
+			add_child(motion)
+			motion.status = auto_rig.show_status
+			motion.made.connect(_on_motion_made)
+		else:
+			motion.free()
+			motion = null
+		if "--features-quit" in args:
+			print("VIEWER-FEATURES rig=%s motion=%s" % [rig_on, motion_on])
+			get_tree().quit(0)
 	if ClassDB.get_class_list().find("FBXDocument") != -1:
 		fbx_doc = ClassDB.instantiate("FBXDocument")
 

@@ -2,7 +2,13 @@
 # Build the desktop viewer packages with the auto-rig and its weights.
 #
 #   tools/package_desktop.sh pck <out dir>            export skintokens-viewer.pck from HEAD
-#   tools/package_desktop.sh package <out dir> <w>    lay out and archive the three packages
+#   tools/package_desktop.sh package <out dir> <w> [skintokens|kimodo-motion]
+#                                                     lay out and archive the three packages
+#                                                     in <out dir>/<viewer>/ with SHA256SUMS
+#
+# One pck, two viewers. Each feature is on when its weights are in the package's w folder:
+#   skintokens     skintokens-viewer, the rig weights (R auto-rigs), no Kimodo (the default)
+#   kimodo-motion  kimodo-motion-viewer, the Kimodo weights (the Motion list), no rig weights
 #
 # Inputs (environment):
 #   ENGINE   dir with godot.macos.editor.double.arm64 and the three template_release runtimes
@@ -12,8 +18,8 @@
 #   ELF      skintokens.elf
 #   USD_ELF  usd.elf (interactor-usd-guest), the OpenUSD reader for .usd, .usda, .usdc and .usdz
 #   MOTION_ELF  motion.elf (interactor-motion-guest)
-# <w> holds mesh-encoder.gguf, skin-vae.gguf, tokenrig.gguf and
-# Kimodo-SOMA-RP-v1.1-gguf/kimodo-soma-rp-v1.1.gguf (chibifire/Kimodo-SOMA-RP-v1.1-gguf).
+# <w> holds mesh-encoder.gguf, skin-vae.gguf and tokenrig.gguf (skintokens), or
+# Kimodo-SOMA-RP-v1.1-gguf/kimodo-soma-rp-v1.1.gguf (kimodo-motion, chibifire/Kimodo-SOMA-RP-v1.1-gguf).
 # The pck is OS-independent; `package` runs anywhere with zip and tar (the Windows desk's WSL is
 # fastest for the 1.3 GB archives). Archives store the weights uncompressed (zip -0 for .gguf).
 set -eu
@@ -52,35 +58,42 @@ E
   exit 0
 fi
 
-[ "$cmd" = package ] || { sed -n 2,16p "$0"; exit 2; }
-w=$3
-for f in mesh-encoder.gguf skin-vae.gguf tokenrig.gguf Kimodo-SOMA-RP-v1.1-gguf/kimodo-soma-rp-v1.1.gguf; do
+[ "$cmd" = package ] || { sed -n 2,22p "$0"; exit 2; }
+w=$3 variant=${4:-skintokens}
+case $variant in
+  skintokens) app=skintokens-viewer weights="mesh-encoder.gguf skin-vae.gguf tokenrig.gguf" ;;
+  kimodo-motion) app=kimodo-motion-viewer weights="Kimodo-SOMA-RP-v1.1-gguf/kimodo-soma-rp-v1.1.gguf" ;;
+  *) echo "unknown viewer $variant"; exit 2 ;;
+esac
+for f in $weights; do
   [ -f "$w/$f" ] || { echo "missing $w/$f"; exit 1; }
 done
-lay() { # <os> <runtime> <exe name> <library>
-  d="$out/$1/skintokens-viewer"
-  rm -rf "$out/$1" && mkdir -p "$d/w"
-  cp "$ENGINE/$2" "$d/$3" && chmod +x "$d/$3"
-  cp "$out/skintokens-viewer.pck" "$d/"
+lay() { # <os> <runtime> <exe suffix> <library>
+  d="$out/$variant/$1/$app"
+  rm -rf "$out/$variant/$1" && mkdir -p "$d/w"
+  cp "$ENGINE/$2" "$d/$app$3" && chmod +x "$d/$app$3"
+  # Godot loads the pck that has the name of the program.
+  cp "$out/skintokens-viewer.pck" "$d/$app.pck"
   cp -R "$SANDBOX/$4" "$d/"
   cp "$ENGINE/LICENSE-model-explorer.txt" "$d/"
-  cp "$w"/mesh-encoder.gguf "$w"/skin-vae.gguf "$w"/tokenrig.gguf "$d/w/"
-  mkdir -p "$d/w/Kimodo-SOMA-RP-v1.1-gguf"
-  cp "$w"/Kimodo-SOMA-RP-v1.1-gguf/kimodo-soma-rp-v1.1.gguf "$d/w/Kimodo-SOMA-RP-v1.1-gguf/"
+  for f in $weights; do
+    mkdir -p "$d/w/$(dirname "$f")" && cp "$w/$f" "$d/w/$f"
+  done
 }
-lay macos godot.macos.template_release.double.arm64 skintokens-viewer \
+lay macos godot.macos.template_release.double.arm64 "" \
   libgodot_riscv.macos.template_release.double.universal.framework
-lay windows godot.windows.template_release.double.x86_64.llvm.exe skintokens-viewer.exe \
+lay windows godot.windows.template_release.double.x86_64.llvm.exe .exe \
   libgodot_riscv.windows.template_release.double.x86_64.dll
-lay linux godot.linuxbsd.template_release.double.x86_64 skintokens-viewer \
+lay linux godot.linuxbsd.template_release.double.x86_64 "" \
   libgodot_riscv.linux.template_release.double.x86_64.so
 # Archives hold the files at the top level: Explorer and Archive Utility already extract into a folder
-# named after the archive, so a top folder inside it would give skintokens-viewer-*/skintokens-viewer/.
-rm -f "$out"/skintokens-viewer-*.zip
-(cd "$out/macos/skintokens-viewer" && zip -qry -n .gguf ../../skintokens-viewer-macos-arm64.zip .)
-(cd "$out/windows/skintokens-viewer" && zip -qr -n .gguf ../../skintokens-viewer-windows-x86_64.zip .)
-(cd "$out/linux/skintokens-viewer" && tar -cf ../../skintokens-viewer-linux-x86_64.tar -- *)
-(cd "$out" && sha256sum skintokens-viewer-*.zip skintokens-viewer-*.tar > SHA256SUMS 2>/dev/null \
-  || shasum -a 256 skintokens-viewer-*.zip skintokens-viewer-*.tar > SHA256SUMS)
-cat "$out/SHA256SUMS"
+# named after the archive, so a top folder inside it would give <app>-*/<app>/.
+o="$out/$variant"
+rm -f "$o/$app"-*.zip "$o/$app"-*.tar
+(cd "$o/macos/$app" && zip -qry -n .gguf "$o/$app-macos-arm64.zip" .)
+(cd "$o/windows/$app" && zip -qr -n .gguf "$o/$app-windows-x86_64.zip" .)
+(cd "$o/linux/$app" && tar -cf "$o/$app-linux-x86_64.tar" -- *)
+(cd "$o" && sha256sum "$app"-*.zip "$app"-*.tar > SHA256SUMS 2>/dev/null \
+  || shasum -a 256 "$app"-*.zip "$app"-*.tar > SHA256SUMS)
+cat "$o/SHA256SUMS"
 echo PACKAGE-OK

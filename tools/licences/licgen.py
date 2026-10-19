@@ -3,7 +3,8 @@
     python3 tools/licences/licgen.py <out dir>      -> <out>/skintokens/{LICENSE.md,NOTICE,CITATION.cff}
                                         <out>/kimodo-motion/{...}
 
-Both viewers ship the same pck contents (skintokens.elf, motion.elf, usd.elf, the 18 prompt
+Both viewers ship the same pck contents (skintokens.elf, motion.elf, usd.elf, headfit.elf, mm.elf
+and its walk-mode clips, the 18 prompt
 embeddings); they differ only in the weights in w/. Licence texts in src/ are copied from each
 part's own repository; src/old-citations.yaml holds the reference entries of the two
 CITATION.cff files as first published. Upload the three files to each HF repo, then give that
@@ -71,6 +72,20 @@ PARTS = [
      "ggml-rd", "ggml-rd", None),
     ("[nlohmann/json](" + GH + "nlohmann/json)", "inside `skintokens.elf`", "MIT", "nlohmann/json",
      "JSON for Modern C++", None),
+    ("[interactor-headfit](" + GH + "V-Sekai-fire/interactor-headfit) (eye-close shapes `headfit.elf`)",
+     "in `{pck}`", "MIT", "interactor-headfit", "interactor-headfit", None),
+    ("[interactor-motion-matching-guest](" + GH + "V-Sekai-fire/interactor-motion-matching-guest) (walk mode "
+     "`mm.elf`, a port of [godot-motion-matching](" + GH + "V-Sekai/godot-motion-matching) by Guilherme Sousa)",
+     "in `{pck}`", "MIT", "interactor-motion-matching-guest", "interactor-motion-matching-guest", None),
+    ("Walk-mode clips from the [O3DE MotionMatching gem](" + GH + "o3de/o3de/tree/development/Gems/MotionMatching) "
+     "(motion capture, moved onto the SOMA skeleton)",
+     "`motion/mm/*.f32` in `{pck}`", "Apache-2.0 OR MIT (used here under MIT)",
+     "O3DE MotionMatching gem clips", "O3DE MotionMatching gem", None),
+    ("Walk-mode clips made with [Kimodo-SOMA-RP-v1.1](https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.1) (NVIDIA) "
+     "by `motion.elf`. They are the output of a program; no person wrote them. The package does not contain "
+     "the Kimodo weights unless listed below",
+     "`motion/mm/*.f32` in `{pck}`", "Output of a model under the NVIDIA Open Model License",
+     None, "Kimodo-SOMA-RP-v1.1", None),
     ("[Model Explorer](" + GH + "V-Sekai-fire/entities-model-explorer) (the viewer)", "`{pck}`", "MIT",
      "Model Explorer", "Model Explorer", None),
     ("[godot-vrm and Godot-MToon-Shader](" + GH + "V-Sekai/godot-vrm)", "in `{pck}`", "MIT",
@@ -116,6 +131,9 @@ def sections(weights):
          ("ggml", text_block("ggml.md")),
          ("ggml-rd", text_block("ggml_rd.md")),
          ("nlohmann/json", text_block("nlohmann_json.md")),
+         ("interactor-headfit", text_block("headfit.LICENSE")),
+         ("interactor-motion-matching-guest", text_block("motion-matching-guest.LICENSE")),
+         ("O3DE MotionMatching gem clips (MIT)", text_block("o3de.MIT.LICENSE")),
          ("Model Explorer", text_block("Model_Explorer.md")),
          ("godot-vrm and Godot-MToon-Shader", text_block("godot_vrm_and_Godot_MToon_Shader.md")),
          ("interactor-usd-guest", text_block("interactor_usd_guest.md")),
@@ -162,7 +180,7 @@ def notice(v):
 
 
 def citation(v, refs):
-    want = [c for _, _, _, _, c, only in PARTS if only is None or v["weights"] in only]
+    want = list(dict.fromkeys(c for _, _, _, _, c, only in PARTS if only is None or v["weights"] in only))
     want.insert(want.index("kimodo-ggml") + 1, "motion-bricks-ggml")
     missing = [w for w in want if w not in refs]
     if missing:
@@ -190,6 +208,18 @@ def refs_table():
     refs["motion-bricks-ggml"] = {"type": "software", "title": "motion-bricks-ggml", "authors": [FIRE],
                                   "repository-code": GH + "V-Sekai-fire/motion-bricks-ggml",
                                   "license": "Apache-2.0", "notes": "Vendored in motion.elf."}
+    refs["interactor-headfit"] = {"type": "software", "title": "interactor-headfit", "authors": [FIRE],
+                                  "repository-code": GH + "V-Sekai-fire/interactor-headfit", "license": "MIT",
+                                  "notes": "headfit.elf, the eye-close shapes of a rigged VRM."}
+    refs["interactor-motion-matching-guest"] = {
+        "type": "software", "title": "interactor-motion-matching-guest", "authors": [FIRE],
+        "repository-code": GH + "V-Sekai-fire/interactor-motion-matching-guest", "license": "MIT",
+        "notes": "mm.elf, the walk mode (M). A port of godot-motion-matching by Guilherme Sousa "
+                 "(https://github.com/V-Sekai/godot-motion-matching, MIT)."}
+    refs["O3DE MotionMatching gem"] = {
+        "type": "software", "title": "O3DE MotionMatching gem", "authors": [{"name": "Contributors to the Open 3D Engine"}],
+        "repository-code": GH + "o3de/o3de/tree/development/Gems/MotionMatching", "license": "MIT",
+        "notes": "Apache-2.0 OR MIT, used under MIT. 21 motion-capture clips of the walk mode, moved onto the SOMA skeleton."}
     r = refs["Llama-3-Kimodo-GGML (LLM2Vec encoder, Meta Llama 3)"]
     r["notes"] = ("Meta Llama 3 Community License. Made the 18 prompt embeddings in the pck ahead of time. "
                   "These inputs are the output of a program; no person wrote them. The downloads do not "

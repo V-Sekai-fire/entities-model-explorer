@@ -7,6 +7,7 @@ extends Node
 # the same T-pose and joint frames as a .vrm input) and opens that file.
 # A .vrm keeps its own skeleton: R saves it as VRM 1.0 (godot-vrm), puts it in a T-pose from any
 # pose and turns each joint's +Y along its bone (skintokens.elf, no weights), as <name>.tpose.vrm.
+# Every saved .vrm without one-eye blinks gets headfit.elf's anime eye closes (FaceBlink.gd).
 # An opened .usd, .usda, .usdc or .usdz file is rigged from the GLB the viewer made of it
 # (UsdImport.gd), and the result is <name>.rigged.glb beside the USD file.
 # Test mode: `-- <file.glb> --auto-rig-quit` rigs the file once it is open, opens the result,
@@ -18,6 +19,7 @@ const CardStyle = preload("res://vsk_model_explorer/core/CardStyle.gd")
 const Bintr = preload("res://vsk_model_explorer/core/Bintr.gd")
 const ELF := "res://skintokens.elf"
 const VrmExport := preload("res://vsk_model_explorer/core/VrmExport.gd")
+const FaceBlink := preload("res://vsk_model_explorer/core/FaceBlink.gd")
 const WAIT_GPU := 1
 const READ := 2
 const UPLOAD := 3
@@ -297,7 +299,22 @@ func run_vrm(path: String, out_path := "") -> String:
 	f.store_buffer(bytes)
 	f.close()
 	print("AUTO-RIG-OK %s bytes=%d ms=%d" % [out, bytes.size(), Time.get_ticks_msec() - t0])
+	add_blink(out, path)
 	return out
+
+
+# An avatar with no blink of its own gets headfit's anime eye closes (FaceBlink.gd). A failure
+# here is logged and leaves the saved file as it was: the rig itself has succeeded.
+func add_blink(path: String, source_path: String) -> void:
+	show_status("Auto-rig: eye closes...")
+	var fb := FaceBlink.new()
+	var why := fb.add(path, false, source_path)
+	if why != "":
+		print("AUTO-RIG-BLINK skipped: ", why)
+	elif fb.report.has("skipped"):
+		print("AUTO-RIG-BLINK skipped: ", fb.report.skipped)
+	else:
+		print("AUTO-RIG-BLINK ", JSON.stringify(fb.report))
 
 
 # True when the file's glTF JSON carries the VRM 1.0 extension (VRMC_vrm).

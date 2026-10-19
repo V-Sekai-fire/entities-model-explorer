@@ -2,7 +2,9 @@ extends Node
 # Desktop auto-rig: R rigs the open model with skintokens.elf in the godot-sandbox add-on, on a
 # local RenderingDevice (Vulkan, Metal or D3D12), and opens the result. The weights are the three
 # GGUF files in the folder `w` beside the program. The rigged GLB is saved beside the source
-# file as <name>.rigged.glb, or in the user folder if that one is read-only.
+# file as <name>.rigged.glb, or in the user folder if that one is read-only. When the rig passes
+# the humanoid gates (skintokens.elf), the viewer also saves it as <name>.vrm (VrmExport.gd, then
+# the same T-pose and joint frames as a .vrm input) and opens that file.
 # A .vrm keeps its own skeleton: R saves it as VRM 1.0 (godot-vrm), puts it in a T-pose from any
 # pose and turns each joint's +Y along its bone (skintokens.elf, no weights), as <name>.tpose.vrm.
 # An opened .usd, .usda, .usdc or .usdz file is rigged from the GLB the viewer made of it
@@ -14,6 +16,7 @@ signal rigged(path: String)
 
 const CardStyle = preload("res://vsk_model_explorer/core/CardStyle.gd")
 const ELF := "res://skintokens.elf"
+const VrmExport := preload("res://vsk_model_explorer/core/VrmExport.gd")
 const WAIT_GPU := 1
 const READ := 2
 const UPLOAD := 3
@@ -141,13 +144,7 @@ func show_saved(path: String) -> void:
 func run(mesh: String) -> String:
 	var t0 := Time.get_ticks_msec()
 	show_status("Auto-rig: starting...")
-	_sb = ClassDB.instantiate("Sandbox")
-	_sb.memory_max = 1024
-	_sb.references_max = 4096
-	_sb.allocations_max = 10000000
-	_sb.execution_timeout = 0
-	add_child(_sb)
-	_sb.load_buffer(FileAccess.get_file_as_bytes(ELF))
+	new_sandbox()
 	if not _sb.has_function("skintokens_start"):
 		return fail("skintokens.elf did not load")
 	if _rd == null:
@@ -173,6 +170,47 @@ func run(mesh: String) -> String:
 	f.store_buffer(glb)
 	f.close()
 	print("AUTO-RIG-OK %s bytes=%d ms=%d" % [out, glb.size(), Time.get_ticks_msec() - t0])
+	var vrm := await rigged_to_vrm(out, base)
+	return vrm if vrm != "" else out
+
+
+func new_sandbox() -> void:
+	_sb = ClassDB.instantiate("Sandbox")
+	_sb.memory_max = 1024
+	_sb.references_max = 4096
+	_sb.allocations_max = 10000000
+	_sb.execution_timeout = 0
+	add_child(_sb)
+	_sb.load_buffer(FileAccess.get_file_as_bytes(ELF))
+
+
+# A rig that passes the humanoid gates is also saved as <base>.vrm: VrmExport renames the
+# matched joints to VRM bone names, turns the model to +Z and gives it MToon materials; then
+# the VRM step puts it in a T-pose and frames its joints, as for a .vrm input. Returns the .vrm
+# path, or "" when the rig is not a humanoid (the .rigged.glb stays the result).
+func rigged_to_vrm(rigged: String, base: String) -> String:
+	var t0 := Time.get_ticks_msec()
+	new_sandbox()
+	if not _sb.has_function("skintokens_humanoid_start"):
+		cleanup()
+		return ""
+	show_status("Auto-rig: humanoid check...")
+	_sb.vmcall("skintokens_humanoid_start", rigged)
+	var reply = JSON.parse_string((await drive(t0)).get_string_from_utf8())
+	cleanup()
+	if not (reply is Dictionary) or reply.get("gates") != "pass":
+		var why: String = reply.get("why", "no answer") if reply is Dictionary else "no answer"
+		print("AUTO-RIG-VRM skipped: ", why)
+		return ""
+	show_status("Auto-rig: saving as VRM 1.0...")
+	var tmp := OS.get_user_data_dir().path_join("rigged.tmp.vrm")
+	var exporter := VrmExport.new()
+	var why := exporter.export_vrm(rigged, reply.roles, tmp)
+	if why != "":
+		print("AUTO-RIG-VRM skipped: ", why)
+		return ""
+	var out := await run_vrm(tmp, base + ".vrm")
+	DirAccess.remove_absolute(tmp)
 	return out
 
 
@@ -223,7 +261,7 @@ func _stop(why: String) -> PackedByteArray:
 	return PackedByteArray()
 
 
-func run_vrm(path: String) -> String:
+func run_vrm(path: String, out_path := "") -> String:
 	var t0 := Time.get_ticks_msec()
 	# A VRM 1.0 already faces +Z and goes in as it is; a godot-vrm round trip can move its
 	# vertices (up to 11 cm measured). A VRM 0.x is turned to +Z by godot-vrm first.
@@ -234,13 +272,7 @@ func run_vrm(path: String) -> String:
 		var why := save_vrm1(path, vrm1)
 		if why != "":
 			return fail(why)
-	_sb = ClassDB.instantiate("Sandbox")
-	_sb.memory_max = 1024
-	_sb.references_max = 4096
-	_sb.allocations_max = 10000000
-	_sb.execution_timeout = 0
-	add_child(_sb)
-	_sb.load_buffer(FileAccess.get_file_as_bytes(ELF))
+	new_sandbox()
 	if not _sb.has_function("skintokens_vrm_start"):
 		return fail("skintokens.elf has no VRM step")
 	show_status("Auto-rig: T-pose...")
@@ -251,10 +283,10 @@ func run_vrm(path: String) -> String:
 	if bytes.is_empty():
 		return ""
 	cleanup()
-	var out := path.get_basename() + ".tpose.vrm"
+	var out := out_path if out_path != "" else path.get_basename() + ".tpose.vrm"
 	var f := FileAccess.open(out, FileAccess.WRITE)
 	if f == null:
-		out = OS.get_user_data_dir().path_join(path.get_file().get_basename() + ".tpose.vrm")
+		out = OS.get_user_data_dir().path_join(out.get_file())
 		f = FileAccess.open(out, FileAccess.WRITE)
 	if f == null:
 		return fail("cannot save the result")

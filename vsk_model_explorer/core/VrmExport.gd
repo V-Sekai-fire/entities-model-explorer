@@ -24,21 +24,45 @@ const EXTENSIONS := [
 ]
 const NAMED_SKIN_BINDS := 16  # EditorSceneFormatImporter.IMPORT_USE_NAMED_SKIN_BINDS
 const ROLE_TO_HUMAN := {
-	"hips": "Hips", "spine1": "Spine", "spine2": "Chest", "chest": "UpperChest",
-	"neck": "Neck", "head": "Head",
-	"left_shoulder": "LeftShoulder", "left_upper_arm": "LeftUpperArm",
-	"left_forearm": "LeftLowerArm", "left_hand": "LeftHand",
-	"right_shoulder": "RightShoulder", "right_upper_arm": "RightUpperArm",
-	"right_forearm": "RightLowerArm", "right_hand": "RightHand",
-	"left_upper_leg": "LeftUpperLeg", "left_shin": "LeftLowerLeg",
-	"left_foot": "LeftFoot", "left_toe": "LeftToes",
-	"right_upper_leg": "RightUpperLeg", "right_shin": "RightLowerLeg",
-	"right_foot": "RightFoot", "right_toe": "RightToes",
+	"hips": "Hips",
+	"spine1": "Spine",
+	"spine2": "Chest",
+	"chest": "UpperChest",
+	"neck": "Neck",
+	"head": "Head",
+	"left_shoulder": "LeftShoulder",
+	"left_upper_arm": "LeftUpperArm",
+	"left_forearm": "LeftLowerArm",
+	"left_hand": "LeftHand",
+	"right_shoulder": "RightShoulder",
+	"right_upper_arm": "RightUpperArm",
+	"right_forearm": "RightLowerArm",
+	"right_hand": "RightHand",
+	"left_upper_leg": "LeftUpperLeg",
+	"left_shin": "LeftLowerLeg",
+	"left_foot": "LeftFoot",
+	"left_toe": "LeftToes",
+	"right_upper_leg": "RightUpperLeg",
+	"right_shin": "RightLowerLeg",
+	"right_foot": "RightFoot",
+	"right_toe": "RightToes",
 }
 const REQUIRED := [
-	"hips", "spine1", "head", "left_upper_arm", "left_forearm", "left_hand", "right_upper_arm",
-	"right_forearm", "right_hand", "left_upper_leg", "left_shin", "left_foot", "right_upper_leg",
-	"right_shin", "right_foot",
+	"hips",
+	"spine1",
+	"head",
+	"left_upper_arm",
+	"left_forearm",
+	"left_hand",
+	"right_upper_arm",
+	"right_forearm",
+	"right_hand",
+	"left_upper_leg",
+	"left_shin",
+	"left_foot",
+	"right_upper_leg",
+	"right_shin",
+	"right_foot",
 ]
 
 var report := {}  # what the export decided, for logs and tests
@@ -83,7 +107,10 @@ func _build(scene: Node, roles: Dictionary, title: String) -> String:
 	left.y = 0
 	var forward := left.cross(Vector3.UP).normalized()
 	if roles.has("left_toe") and roles.has("right_toe"):
-		var toes: Vector3 = (p.call("left_toe") - p.call("left_foot")) + (p.call("right_toe") - p.call("right_foot"))
+		var toes: Vector3 = (
+			(p.call("left_toe") - p.call("left_foot"))
+			+ (p.call("right_toe") - p.call("right_foot"))
+		)
 		toes.y = 0
 		report.toe_agreement = toes.normalized().dot(forward)
 		if report.toe_agreement < 0:
@@ -178,15 +205,25 @@ static func _to_root(node: Node3D, root: Node) -> Transform3D:
 const T_POSE_TOLERANCE := 5.0
 
 
-static func _t_pose(scene: Node, skel: Skeleton3D, roles: Dictionary, to_scene: Transform3D) -> Array:
+static func _t_pose(
+	scene: Node, skel: Skeleton3D, roles: Dictionary, to_scene: Transform3D
+) -> Array:
 	var drops := []
 	var new_rest := {}
 	var to_skel := to_scene.basis.inverse()
 	for side in ["left", "right"]:
-		var out_dir: Vector3 = (to_skel * (Vector3.RIGHT if side == "left" else Vector3.LEFT)).normalized()
+		var out_dir: Vector3 = (
+			(to_skel * (Vector3.RIGHT if side == "left" else Vector3.LEFT)).normalized()
+		)
 		var chain := [roles[side + "_upper_arm"], roles[side + "_forearm"], roles[side + "_hand"]]
 		var idx := chain.map(func(n): return skel.find_bone(n))
-		var d: Vector3 = to_scene.basis * (_global_rest(skel, idx[1], new_rest).origin - _global_rest(skel, idx[0], new_rest).origin)
+		var d: Vector3 = (
+			to_scene.basis
+			* (
+				_global_rest(skel, idx[1], new_rest).origin
+				- _global_rest(skel, idx[0], new_rest).origin
+			)
+		)
 		var drop := rad_to_deg(atan2(-d.y, Vector2(d.x, d.z).length()))
 		drops.append(snappedf(drop, 0.1))
 		if absf(drop) <= T_POSE_TOLERANCE:
@@ -254,7 +291,9 @@ static func _bake_rest(scene: Node, skel: Skeleton3D, new_rest: Dictionary) -> v
 				shapes.append(_apply_per_vertex(shape, per_vertex, relative))
 			arrays = _apply_per_vertex(arrays, per_vertex, false)
 			var flags := src.surface_get_format(s) & Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
-			dst.add_surface_from_arrays(src.surface_get_primitive_type(s), arrays, shapes, {}, flags)
+			dst.add_surface_from_arrays(
+				src.surface_get_primitive_type(s), arrays, shapes, {}, flags
+			)
 			dst.surface_set_material(s, src.surface_get_material(s))
 			dst.surface_set_name(s, src.surface_get_name(s))
 		done[src] = dst

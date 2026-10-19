@@ -15,8 +15,8 @@ run/main_scene="res://vsk_model_explorer/scene/ModelExplorer.tscn"
 config/features=PackedStringArray("4.6", "Double Precision", "Forward Plus")
 boot_splash/show_image=false
 config/icon="res://icon.svg"
-config/macos_native_icon="res://resource/icon/app_icon.icns"
-config/windows_native_icon="res://resource/icon/app_icon.ico"
+config/macos_native_icon="res://vsk_model_explorer/resource/icon/app_icon.icns"
+config/windows_native_icon="res://vsk_model_explorer/resource/icon/app_icon.ico"
 
 [autoload]
 

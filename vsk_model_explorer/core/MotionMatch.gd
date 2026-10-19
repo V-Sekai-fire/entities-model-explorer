@@ -1,6 +1,8 @@
 extends Node
 # M walks the open rigged model like a character controller. Keyboard: W A S D move (relative to
 # the camera), Shift runs, C crouches, Z crawls (each again to stand), Space jumps, M stops.
+# Mouse or touch: click or tap the floor and the model walks there; a double click or double tap
+# runs there. A ring marks the point until the model arrives; any move key or the stick cancels it.
 # Gamepad: left stick moves, right stick turns the camera, A jumps, B crouches, Y crawls, the right
 # trigger runs, Start stops. Motion matching picks the motion: mm.elf
 # (interactor-motion-matching-guest, a port of godot-motion-matching) holds a pose database built
@@ -25,17 +27,22 @@ const STAND := 0
 const CROUCH := 1
 const CRAWL := 2
 const MODE_NAMES := ["standing", "crouching", "crawling"]
+# Walk to a point: a press and release closer than TAP_SLOP pixels is a tap (a drag is not).
+# The model stops within ARRIVE SOMA metres of the point.
+const TAP_SLOP := 12.0
+const ARRIVE := 0.3
 # The controls card rows this adds; the status line repeats them while walking.
 # Keyboard and gamepad on one row each.
 const CARD_ROWS := [
 	["keys", ["M"], "M or Start", "Walk mode"],
 	["keys", ["W"], "WASD or stick", "Walk"],
+	["mouse", "left", "Tap or click floor", "Walk there, 2x run"],
 	["keys", ["Shift"], "Shift or RT", "Run"],
 	["keys", ["C"], "C or pad B", "Crouch"],
 	["keys", ["Z"], "Z or pad Y", "Crawl"],
 	["keys", ["Space"], "Space or A", "Jump"],
 ]
-const HELP := "W A S D walk, Shift run, C crouch, Z crawl, Space jump, M stop (gamepad: stick, RT, B, Y, A, Start)"
+const HELP := "W A S D or click the floor walk, double click runs there, Shift run, C crouch, Z crawl, Space jump, M stop (gamepad: stick, RT, B, Y, A, Start)"
 
 var source := ""
 var busy := false
@@ -69,6 +76,13 @@ var _test_jump := false
 var _start_after_load := false
 var _jumping := false
 var _kind := 0
+var _target := Vector3.ZERO
+var _has_target := false
+var _target_run := false
+var _press_pos := Vector2.ZERO
+var _press_down := false
+var _press_run := false
+var _marker: MeshInstance3D
 
 
 func _ready() -> void:
@@ -102,6 +116,65 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_mode = STAND if _mode == CRAWL else CRAWL
 	elif on and k.keycode == KEY_SPACE:
 		_jump_pressed = true
+
+
+# A click or tap on the floor (mouse, or touch through Godot's mouse emulation) sets the point.
+func _unhandled_input(event: InputEvent) -> void:
+	var b := event as InputEventMouseButton
+	if not on or b == null or b.button_index != MOUSE_BUTTON_LEFT:
+		return
+	if b.pressed:
+		_press_pos = b.position
+		_press_run = b.double_click
+		_press_down = true
+	elif _press_down:
+		_press_down = false
+		if (
+			b.position.distance_to(_press_pos) <= TAP_SLOP
+			and walk_to_screen(b.position, _press_run)
+		):
+			get_viewport().set_input_as_handled()
+
+
+# The floor point under a screen position: where the camera ray meets the floor the model
+# stands on. False when the ray does not reach the floor (pointing at the sky).
+func walk_to_screen(pos: Vector2, run: bool) -> bool:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return false
+	var hit = Plane(Vector3.UP, _origin.y).intersects_ray(
+		cam.project_ray_origin(pos), cam.project_ray_normal(pos)
+	)
+	if hit == null:
+		return false
+	walk_to(hit, run)
+	return true
+
+
+func walk_to(point: Vector3, run: bool) -> void:
+	_target = Vector3(point.x, _origin.y, point.z)
+	_has_target = true
+	_target_run = run
+	if _marker == null:
+		_marker = MeshInstance3D.new()
+		var ring := TorusMesh.new()
+		ring.inner_radius = 0.12
+		ring.outer_radius = 0.16
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.albedo_color = Color(1.0, 0.78, 0.35)
+		ring.material = mat
+		_marker.mesh = ring
+		get_parent().add_child(_marker)
+	_marker.scale = Vector3.ONE * _scale
+	_marker.position = _target + Vector3.UP * 0.01 * _scale
+	_marker.visible = true
+
+
+func _clear_target() -> void:
+	_has_target = false
+	if _marker:
+		_marker.visible = false
 
 
 func toggle() -> void:
@@ -181,6 +254,7 @@ func stop() -> void:
 	if not on:
 		return
 	on = false
+	_clear_target()
 	remove_from_group("walk_mode")
 	if _player:
 		_player.stop()
@@ -403,7 +477,13 @@ func _begin() -> void:
 	_clip = -1
 	_mode = STAND
 	_jump_pressed = false
+	_clear_target()
 	_origin = _scene.position
+	# Look down at the floor around the model so a click or tap can reach it. The camera starts
+	# level at the model's feet, where every floor point is on the horizon line.
+	var rot := get_parent().get_node_or_null("CamController/CamRotHelper") as Node3D
+	if rot and rot.rotation.x > deg_to_rad(-10.0):
+		rot.rotation.x = deg_to_rad(-25.0)
 	on = true
 	add_to_group("walk_mode")
 	_last_world = _origin
@@ -454,6 +534,18 @@ func _process(delta: float) -> void:
 		_jump_pressed = _jump_pressed or _test_jump
 		_test_jump = false
 	# The right stick turns the camera.
+	# Walk to the tapped point unless a move key or the stick takes over.
+	var steer := Vector3.ZERO
+	if input != Vector2.ZERO:
+		_clear_target()
+	elif _has_target:
+		var to := _target - _last_world
+		to.y = 0.0
+		if to.length() < ARRIVE * _scale:
+			_clear_target()
+		else:
+			steer = to.normalized()
+			running = running or _target_run
 	var cc0 := get_parent().get_node_or_null("CamController") as Node3D
 	var rx := Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
 	if cc0 and abs(rx) > 0.2 and not _test:
@@ -462,7 +554,7 @@ func _process(delta: float) -> void:
 	var base: float = (
 		_mode_speed[_mode] if _mode != STAND else (_run_speed if running else _walk_speed)
 	)
-	var speed := base * _scale * input.length()
+	var speed := base * _scale * (1.0 if steer != Vector3.ZERO else input.length())
 	# Camera-relative input in the scene: forward is away from the camera, on the floor.
 	var cam := get_viewport().get_camera_3d()
 	var fwd := Vector3(0, 0, -1)
@@ -475,6 +567,8 @@ func _process(delta: float) -> void:
 	var want := (
 		(fwd * input.y + right * input.x).normalized() * speed if speed > 0 else Vector3.ZERO
 	)
+	if steer != Vector3.ZERO:
+		want = steer * speed
 	# Scene to SOMA: undo the rig's turn and scale.
 	var soma_v := want.rotated(Vector3.UP, -_phi) / _scale
 	var jump := 1 if _jump_pressed else 0
@@ -608,5 +702,72 @@ func _run_test() -> void:
 		if shots != "":
 			get_viewport().get_texture().get_image().save_png(shots + "-%s.png" % step[0])
 		ok = ok and good
+	# Walk to a point: a real left click on the floor, sent through the input queue, then a double
+	# click to run. Pass = the model gets there and stops there.
+	var walked := 0.0
+	for tap in [["tap-walk", false], ["tap-run", true]]:
+		var took: float = await _test_tap(tap[0], tap[1])
+		# Running there must be clearly quicker than walking the same distance.
+		var good: bool = took > 0.0 and (not tap[1] or took < 0.8 * walked)
+		if tap[1]:
+			print(
+				(
+					"MOVE-STEP tap-quicker run=%.2fs walk=%.2fs %s"
+					% [took, walked, "ok" if good else "BAD"]
+				)
+			)
+		walked = took if not tap[1] else walked
+		if shots != "":
+			get_viewport().get_texture().get_image().save_png(shots + "-%s.png" % tap[0])
+		ok = ok and good
 	print("MOVE-OK" if ok else "MOVE-FAIL")
 	get_tree().quit(0 if ok else 1)
+
+
+# Seconds to get to a clicked point and stop there, or -1 on a failure.
+func _test_tap(name: String, run: bool) -> float:
+	var cam := get_viewport().get_camera_3d()
+	var fwd := -cam.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var right := Vector3(-fwd.z, 0, fwd.x)
+	var goal := _last_world + (fwd * 2.5 + right * 0.5) * _scale
+	var pos := cam.unproject_position(goal)
+	if cam.is_position_behind(goal) or not get_viewport().get_visible_rect().has_point(pos):
+		print("MOVE-STEP %s BAD the point is off screen" % name)
+		return -1.0
+	_test_input = Vector2.ZERO
+	_test_run = false
+	_test_mode = STAND
+	for pressed in [true, false]:
+		var e := InputEventMouseButton.new()
+		e.button_index = MOUSE_BUTTON_LEFT
+		e.pressed = pressed
+		e.double_click = run and pressed
+		e.position = pos
+		e.global_position = pos
+		Input.parse_input_event(e)
+		await get_tree().process_frame
+	if not _has_target:
+		print("MOVE-STEP %s BAD the click set no point" % name)
+		return -1.0
+	var set_err := Vector2(_target.x - goal.x, _target.z - goal.z).length()
+	var t := 0.0
+	var arrived := -1.0
+	while t < 8.0:
+		await get_tree().process_frame
+		var dt := get_process_delta_time()
+		t += dt
+		if arrived < 0.0 and not _has_target:
+			arrived = t
+		if arrived >= 0.0 and t > arrived + 2.0:
+			break
+	var off := Vector2(_last_world.x - goal.x, _last_world.z - goal.z).length() / _scale
+	var good := arrived >= 0.0 and off < 2.0 * ARRIVE and set_err < 0.05 * _scale
+	print(
+		(
+			"MOVE-STEP %s arrived=%.2fs off=%.2fm set_err=%.3fm %s"
+			% [name, arrived, off, set_err / _scale, "ok" if good else "BAD"]
+		)
+	)
+	return arrived if good else -1.0

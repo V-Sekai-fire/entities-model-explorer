@@ -652,6 +652,9 @@ func _on_mesh_clicked(
 	_shape_idx: int,
 	mesh: MeshInstance3D
 ):
+	# In walk mode a click walks the model there (MotionMatch.gd); it opens no mesh details.
+	if not get_tree().get_nodes_in_group("walk_mode").is_empty():
+		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		if meshViewer != null and not meshViewer.is_queued_for_deletion():
 			meshViewer.queue_free()

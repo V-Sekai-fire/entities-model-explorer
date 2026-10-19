@@ -496,6 +496,10 @@ func _calibrate() -> bool:
 	print(
 		"MOVE-CALIBRATE scale=%.4f turn=%.1f deg hips=%s" % [_scale, rad_to_deg(_phi), _hips_path]
 	)
+	if _skeleton == null:
+		_fail("the walk clip does not move a skeleton bone")
+		return false
+	_rest_to_t_pose()
 	_space_arms()
 	walk.set_meta("mm_calibration", [_scale, _phi, _hips_path])
 	return true
@@ -580,6 +584,80 @@ func _make_tree() -> bool:
 	blend.connect_node("output", 0, "motion_matching")
 	_tree.tree_root = blend
 	return true
+
+
+# Arm rest pose. The clips assume the SOMA rest: a T-pose, arms straight out. A model bound in
+# an A-pose (Mint: upper arms 40 degrees down) gets the same rotations on top of its lowered
+# arms, so every pose sits 40 degrees lower and the arms go through the body. For each arm
+# bone, turn its rotations so that its rest direction plays as the SOMA rest direction:
+# world delta Q becomes Q * C, C taking the model's rest direction to SOMA's. Bones under the
+# hand take the hand's C, so the fingers keep their place on the hand.
+func _rest_to_t_pose() -> void:
+	var walk := _player.get_animation(PREFIX + "walk")
+	if walk.has_meta("t_pose"):
+		return
+	walk.set_meta("t_pose", true)
+	var arms := _arm_chains()
+	if arms.size() != 2:
+		return
+	# SOMA rest offsets: the translations of any clip's first frame (12 floats a joint).
+	var xf := FileAccess.get_file_as_bytes(DIR.path_join("walk.f32")).to_float32_array()
+	var off := func(j: int) -> Vector3:
+		return Vector3(xf[j * 12 + 9], xf[j * 12 + 10], xf[j * 12 + 11])
+	# [shoulder, upper arm, forearm, hand] -> the SOMA joint at the far end of each bone.
+	var soma_left := [off.call(11), off.call(12), off.call(13), off.call(15)]
+	var soma_right := [off.call(17), off.call(18), off.call(19), off.call(21)]
+	var corr := {}
+	var report := []
+	for chain in arms:
+		var left: bool = _skeleton.get_bone_global_rest(chain[1]).origin.x > 0.0
+		var soma: Array = soma_left if left else soma_right
+		for i in 4:
+			if i + 1 >= chain.size():
+				# A hand with no child bone turns with the forearm.
+				corr[chain[i]] = corr[chain[i - 1]]
+				continue
+			var a := _skeleton.get_bone_global_rest(chain[i]).origin
+			var b := _skeleton.get_bone_global_rest(chain[i + 1]).origin
+			var c := Quaternion((b - a).normalized(), (soma[i] as Vector3).normalized())
+			corr[chain[i]] = c
+			if i == 1:
+				report.append(
+					"%s %.0f deg" % [_skeleton.get_bone_name(chain[i]), rad_to_deg(c.get_angle())]
+				)
+		var stack := Array(_skeleton.get_bone_children(chain[3]))
+		while not stack.is_empty():
+			var k: int = stack.pop_back()
+			corr[k] = corr[chain[3]]
+			stack.append_array(_skeleton.get_bone_children(k))
+	var skel := _hips_path.get_slice(":", 0)
+	var frame := func(b: int) -> Quaternion:
+		return (
+			Quaternion.IDENTITY
+			if b < 0
+			else _skeleton.get_bone_global_rest(b).basis.get_rotation_quaternion()
+		)
+	for anim_name in _player.get_animation_list():
+		if not anim_name.begins_with(PREFIX):
+			continue
+		var anim := _player.get_animation(anim_name)
+		for b in corr:
+			var tr := anim.find_track(
+				NodePath("%s:%s" % [skel, _skeleton.get_bone_name(b)]), Animation.TYPE_ROTATION_3D
+			)
+			if tr < 0:
+				continue
+			var p := _skeleton.get_bone_parent(b)
+			var pf: Quaternion = frame.call(p)
+			var of: Quaternion = frame.call(b)
+			var cp: Quaternion = corr.get(p, Quaternion.IDENTITY)
+			var cb: Quaternion = corr[b]
+			for k in anim.track_get_key_count(tr):
+				var v: Quaternion = anim.track_get_key_value(tr, k)
+				var l := pf * v * of.inverse()
+				var l2 := cp.inverse() * l * cb
+				anim.track_set_key_value(tr, k, (pf.inverse() * l2 * of).normalized())
+	print("MOVE-TPOSE ", "; ".join(report))
 
 
 # Arm spacing. The clips are human: arms that hang close to a slim body. Copied onto a wide body

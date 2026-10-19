@@ -15,6 +15,7 @@ extends Node
 signal rigged(path: String)
 
 const CardStyle = preload("res://vsk_model_explorer/core/CardStyle.gd")
+const Bintr = preload("res://vsk_model_explorer/core/Bintr.gd")
 const ELF := "res://skintokens.elf"
 const VrmExport := preload("res://vsk_model_explorer/core/VrmExport.gd")
 const WAIT_GPU := 1
@@ -184,13 +185,7 @@ func run(mesh: String) -> String:
 
 
 func new_sandbox() -> void:
-	_sb = ClassDB.instantiate("Sandbox")
-	_sb.memory_max = 1024
-	_sb.references_max = 4096
-	_sb.allocations_max = 10000000
-	_sb.execution_timeout = 0
-	add_child(_sb)
-	_sb.load_buffer(FileAccess.get_file_as_bytes(ELF))
+	_sb = Bintr.make(self, ELF, 1024, 4096)
 
 
 # A rig that passes the humanoid gates is also saved as <base>.vrm: VrmExport renames the

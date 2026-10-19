@@ -16,6 +16,7 @@ extends Node
 #   basis (base at 0, in-betweens at their positions, the target at 1), as USD interpolates.
 # - A Z-up stage turns to Y-up and metersPerUnit scales to metres, on the single root node.
 
+const Bintr = preload("res://vsk_model_explorer/core/Bintr.gd")
 const ELF := "res://usd.elf"
 const CHUNK := 8 << 20  # bytes per usd_push (the 16 MiB view)
 const SLICE := 1 << 18  # items per array slice
@@ -53,13 +54,7 @@ func to_scene(path: String) -> Node3D:
 	var bytes := FileAccess.get_file_as_bytes(path)
 	if bytes.is_empty():
 		return _fail("cannot read " + path.get_file())
-	_sb = ClassDB.instantiate("Sandbox")
-	_sb.memory_max = 2048
-	_sb.references_max = 4096
-	_sb.allocations_max = 10000000
-	_sb.execution_timeout = 0
-	add_child(_sb)
-	_sb.load_buffer(FileAccess.get_file_as_bytes(ELF))
+	_sb = Bintr.make(self, ELF, 2048, 4096)
 	if not _sb.has_function("usd_skeleton_info"):
 		return _close(_fail("usd.elf did not load"))
 	_sb.vmcall("usd_init")

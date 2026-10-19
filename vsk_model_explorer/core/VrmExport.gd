@@ -179,9 +179,6 @@ func _write(scene: Node, out_path: String) -> String:
 	for e in EXTENSIONS:
 		exts.append(e.new())
 		GLTFDocument.register_gltf_document_extension(exts[-1])
-	# Registered last, so it runs after VRMC_vrm has written the meta.
-	exts.append(DropEmptyMeta.new())
-	GLTFDocument.register_gltf_document_extension(exts[-1])
 	var doc := GLTFDocument.new()
 	doc.root_node_mode = GLTFDocument.ROOT_NODE_MODE_MULTI_ROOT
 	var state := GLTFState.new()
@@ -199,21 +196,6 @@ func _write(scene: Node, out_path: String) -> String:
 		GLTFDocument.unregister_gltf_document_extension(e)
 	root.free()
 	return "" if err == OK else "VRM write failed (%s)" % error_string(err)
-
-
-# The VRM add-on writes every meta list, also an empty one ("references": []). The VRM 1.0 schema
-# gives those lists minItems 1, and the glTF validator reports EMPTY_ENTITY. An optional field
-# without a value is left out.
-class DropEmptyMeta:
-	extends GLTFDocumentExtension
-
-	func _export_post(state: GLTFState) -> Error:
-		var vrm: Dictionary = state.json.get("extensions", {}).get("VRMC_vrm", {})
-		var meta: Dictionary = vrm.get("meta", {})
-		for k in meta.keys():
-			if (meta[k] is Array or meta[k] is Dictionary) and meta[k].is_empty():
-				meta.erase(k)
-		return OK
 
 
 static func _to_root(node: Node3D, root: Node) -> Transform3D:

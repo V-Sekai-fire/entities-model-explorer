@@ -10,6 +10,13 @@ import sys
 REQUIRED = ["hips", "spine", "head", "leftUpperLeg", "leftLowerLeg", "leftFoot", "rightUpperLeg",
             "rightLowerLeg", "rightFoot", "leftUpperArm", "leftLowerArm", "leftHand",
             "rightUpperArm", "rightLowerArm", "rightHand"]
+# VRMC_vrm.meta properties in the VRM 1.0 schema (meta.schema.json).
+META_KEYS = {"name", "version", "authors", "copyrightInformation", "contactInformation",
+             "references", "thirdPartyLicenses", "thumbnailImage", "licenseUrl",
+             "avatarPermission", "allowExcessivelyViolentUsage", "allowExcessivelySexualUsage",
+             "commercialUsage", "allowPoliticalOrReligiousUsage", "allowAntisocialOrHateUsage",
+             "creditNotation", "allowRedistribution", "modification", "otherLicenseUrl",
+             "extensions", "extras"}
 
 
 def read(path):
@@ -38,6 +45,10 @@ def main(path):
     for k in ("name", "authors", "licenseUrl"):
         if not meta.get(k):
             bad.append(f"meta {k} empty")
+    # VRoid Hub refuses a meta with keys outside the VRM 1.0 schema or with empty values
+    # ("model file is not included in the list"); the glTF validator reports neither.
+    bad += [f"meta {k} not in VRM 1.0 schema" for k in meta if k not in META_KEYS]
+    bad += [f"meta {k} empty" for k, v in meta.items() if v in ("", [], {})]
     roots = j["scenes"][j.get("scene", 0)]["nodes"]
     print(f"{path.split('/')[-1]}: spec {vrm.get('specVersion')} humanBones {len(bones)} "
           f"mtoon {mtoon}/{len(mats)} roots {[j['nodes'][r].get('name') for r in roots]} "

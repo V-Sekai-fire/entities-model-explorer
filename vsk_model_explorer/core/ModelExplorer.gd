@@ -43,7 +43,13 @@ func _ready():
 	flex = Flex.new()
 	add_child(flex)
 	add_control_row(["keys", ["F"], "F", "Flex 20 min"])
-	if not OS.has_feature("web"):
+	if OS.has_feature("web"):
+		# The page rigs the model; here R saves a rigged .glb or a .vrm as a VRM 1.0 file.
+		auto_rig = AutoRig.new()
+		add_child(auto_rig)
+		auto_rig.rigged.connect(_load_file)
+		add_control_row(["keys", ["R"], "R", "Save as .vrm"])
+	else:
 		# One pck, two desktop viewers: each feature is on when its weights are in the w folder.
 		# SkinTokens ships the rig weights; Kimodo motion ships the Kimodo weights.
 		auto_rig = AutoRig.new()
@@ -127,10 +133,29 @@ func _load_file(file_path: String):
 		return
 
 	var ext = normalized_path.get_extension().to_lower()
+	if OS.has_feature("web") and not normalized_path.begins_with(OS.get_user_data_dir()):
+		# The browser deletes a dropped file when files_dropped returns: keep a copy for R.
+		var keep := OS.get_user_data_dir().path_join("dropped")
+		DirAccess.make_dir_recursive_absolute(keep)
+		keep = keep.path_join(normalized_path.get_file())
+		if DirAccess.copy_absolute(normalized_path, keep) == OK:
+			normalized_path = keep
 	if auto_rig:
 		auto_rig.source = normalized_path
 		auto_rig.output_base = ""
 
+	if ext in USD_EXTENSIONS and OS.has_feature("web"):
+		# Web: this script is a guest, and a guest cannot enter a second guest (usd.elf). The
+		# plain-GDScript UsdImport converts on the next frame, outside this call, then opens the GLB.
+		var usd := UsdImport.new()
+		add_child(usd)
+		usd.converted.connect(_on_usd_converted)
+		var dir := OS.get_user_data_dir().path_join("usd")
+		DirAccess.make_dir_recursive_absolute(dir)
+		usd.convert_later(
+			normalized_path, dir.path_join(normalized_path.get_file().get_basename() + ".glb")
+		)
+		return
 	if ext in USD_EXTENSIONS:
 		# OpenUSD (usd.elf) makes a GLB in the user folder; the viewer opens it, and the auto-rig
 		# reads it and saves its result beside the USD file.
@@ -204,6 +229,19 @@ func _load_file(file_path: String):
 		fbx_start_to_load.emit()
 	else:
 		printerr("Unsupported file format: ", ext)
+
+
+func _on_usd_converted(source: String, glb: String, why: String) -> void:
+	if why != "":
+		printerr("USD-FAIL ", why)
+		if auto_rig:
+			auto_rig.show_status(why)
+		gltf_is_loaded.emit(false, null)
+		return
+	print("USD-OK %s -> %s" % [source, glb])
+	_load_file(glb)
+	if auto_rig:
+		auto_rig.output_base = source.get_basename()
 
 
 func _usd_to_glb(path: String) -> String:

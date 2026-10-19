@@ -731,6 +731,33 @@ func _rest_mesh() -> Dictionary:
 	return {pos = pos, bone = bone}
 
 
+# The bones of the body proper, which the arms must clear: the trunk from the hips up to the
+# chest, and the legs (hips children whose chain reaches the floor). Not hair, skirts, tails,
+# bags or the head: long hair hangs beside the arms and would push them far out.
+func _core_bones(chain: Array) -> Dictionary:
+	var core := {}
+	var chest := _skeleton.get_bone_parent(chain[0])
+	var b := chest
+	while b >= 0:
+		core[b] = true
+		b = _skeleton.get_bone_parent(b)
+	var hips := _skeleton.find_bone(_hips_path.get_slice(":", 1))
+	var floor_y := _rest(hips).origin.y * 0.2
+	for c in _skeleton.get_bone_children(hips):
+		var sub := [c]
+		var reaches := false
+		var i := 0
+		while i < sub.size():
+			if _rest(sub[i]).origin.y < floor_y:
+				reaches = true
+			sub.append_array(Array(_skeleton.get_bone_children(sub[i])))
+			i += 1
+		if reaches:
+			for k in sub:
+				core[k] = true
+	return core
+
+
 func _axis(chain: Array) -> Vector3:
 	var hips := _skeleton.find_bone(_hips_path.get_slice(":", 1))
 	var side := _rest(chain[1]).origin - _rest(hips).origin
@@ -741,9 +768,7 @@ func _axis(chain: Array) -> Vector3:
 # Smallest angle out from straight down at which the whole arm (shoulder joint to tip, as a
 # segment half again as thick as the arm) misses every body vertex below the shoulder.
 func _clear_angle(chain: Array, mesh: Dictionary) -> float:
-	var arm := {}
-	for b in chain.slice(1):
-		arm[b] = true
+	var core := _core_bones(chain)
 	var s := _rest(chain[1]).origin
 	var length := 0.0
 	for i in range(1, chain.size() - 1):
@@ -759,7 +784,7 @@ func _clear_angle(chain: Array, mesh: Dictionary) -> float:
 			var a := _rest(b).origin
 			var e := _rest(chain[chain.find(b) + 1]).origin
 			radii.append(Geometry3D.get_closest_point_to_segment(p[i], a, e).distance_to(p[i]))
-		elif not arm.has(b) and b != chain[0] and p[i].y < s.y - 0.1 * length:
+		elif core.has(b) and p[i].y < s.y - 0.1 * length:
 			body.append(p[i])
 	if radii.is_empty() or body.is_empty():
 		return 0.0

@@ -1096,7 +1096,9 @@ func _run_test() -> void:
 		var cr := Vector3(-cf.z, 0, cf.x)
 		var heading: float = rad_to_deg(atan2(moved.dot(cr), moved.dot(cf)))
 		# Facing: the model's own forward (rest +Z turned by the scene) against the way it went.
-		var face := _scene.global_transform.basis * (_to_scene(_skeleton).basis * Vector3.BACK)
+		# The hips carry the clip's own turn (root motion moves only the floor travel), so read
+		# the forward off the posed hips: the rest forward in the hips' frame, turned by the pose.
+		var face := _hips_forward()
 		var face_off: float = (
 			rad_to_deg(Vector2(moved.x, moved.z).angle_to(Vector2(face.x, face.z)))
 			if moved.length() > 0.01
@@ -1211,6 +1213,15 @@ func _test_tap(name: String, run: bool) -> float:
 		)
 	)
 	return arrived if good else -1.0
+
+
+func _hips_forward() -> Vector3:
+	var hb := _skeleton.find_bone(_hips_path.get_slice(":", 1))
+	var at_rest := _skeleton.global_transform * _skeleton.get_bone_global_rest(hb)
+	var posed := _skeleton.global_transform * _skeleton.get_bone_global_pose(hb)
+	var rest_fwd := _scene.global_transform.basis * (_to_scene(_skeleton).basis * Vector3.BACK)
+	var local := at_rest.basis.orthonormalized().inverse() * rest_fwd
+	return posed.basis.orthonormalized() * local
 
 
 func _hips_world() -> Vector3:

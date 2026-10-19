@@ -22,7 +22,7 @@ guest_elfs = [pathlib.Path(x).resolve() for x in sys.argv[5:]]
 # machine fails on the web ("Too many VM calls in progress", or a JSPI SuspendError).
 PLAIN_FILES = {'vsk_model_explorer/core/UsdImport.gd', 'vsk_model_explorer/core/VrmExport.gd',
                'vsk_model_explorer/core/AutoRig.gd', 'vsk_model_explorer/core/Bintr.gd',
-               'vsk_model_explorer/core/FaceBlink.gd'}
+               'vsk_model_explorer/core/FaceBlink.gd', 'vsk_model_explorer/core/FaceRoles.gd'}
 PLAIN_DIRS = ('addons/vrm/',)
 overlay = here / 'overlay'
 if work.exists():

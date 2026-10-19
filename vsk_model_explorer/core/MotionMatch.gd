@@ -690,7 +690,7 @@ func _axis(chain: Array) -> Vector3:
 
 
 # Smallest angle out from straight down at which the whole arm (shoulder joint to tip, as a
-# segment as thick as the arm) misses every body vertex below the shoulder.
+# segment half again as thick as the arm) misses every body vertex below the shoulder.
 func _clear_angle(chain: Array, mesh: Dictionary) -> float:
 	var arm := {}
 	for b in chain.slice(1):
@@ -729,7 +729,10 @@ func _clear_angle(chain: Array, mesh: Dictionary) -> float:
 		var clear := INF
 		for q in body:
 			clear = min(clear, Geometry3D.get_closest_point_to_segment(q, s, tip).distance_to(q))
-		if clear >= r:
+		# Half an arm more than touching: the forearm swings in while walking. Measured on
+		# SK_CharacterMedium: arm vertices inside the body fell from 26-38% to 1.5-2.4% (idle, walk,
+		# run, turn); touching (1.0) left 5-15%.
+		if clear >= 1.5 * r:
 			return deg_to_rad(deg)
 	return deg_to_rad(60.0)
 

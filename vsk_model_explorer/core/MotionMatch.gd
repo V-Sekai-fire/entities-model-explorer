@@ -436,7 +436,11 @@ func _process(delta: float) -> void:
 		_pad()
 	if not on or _mm == null:
 		return
-	var dt: float = clamp(delta, 1.0 / 240.0, 1.0 / 20.0)
+	# Step the controller by the real frame time. A floor here (it was 1/240 s) made the
+	# character move faster than the clock above 240 fps, for example with no vsync.
+	if delta <= 0.0:
+		return
+	var dt: float = min(delta, 1.0 / 20.0)
 	var input := _input_dir()
 	var running := (
 		_test_run
@@ -575,8 +579,12 @@ func _run_test() -> void:
 		var heading: float = rad_to_deg(atan2(moved.x, -moved.z))
 		var off: float = abs(wrapf(heading - step[4], -180.0, 180.0))
 		var share: float = kind_ok / kind_all if kind_all > 0.0 else 0.0
+		# Too fast fails too: a controller step that does not follow the frame time overshoots
+		# at high frame rates (seen: 5.0 for 1.76 on Windows with no vsync).
 		var good: bool = (
-			speed < 0.2 * _scale if want == 0.0 else (speed > 0.6 * want and off < 25.0)
+			speed < 0.2 * _scale
+			if want == 0.0
+			else (speed > 0.6 * want and speed < 1.25 * want and off < 25.0)
 		)
 		if step[6]:
 			good = jumped and air > 0.1

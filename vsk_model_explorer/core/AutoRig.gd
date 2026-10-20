@@ -342,7 +342,11 @@ func save_vrm1(path: String, out: String) -> String:
 	var doc := GLTFDocument.new()
 	var state := GLTFState.new()
 	state.handle_binary_image = GLTFState.HANDLE_BINARY_EMBED_AS_UNCOMPRESSED
-	if doc.append_from_file(path, state) != OK:
+	# Read a copy: an import of the same path can hand back the meshes the viewer's own load
+	# already turned, and godot-vrm would turn them again.
+	var copy := OS.get_user_data_dir().path_join("vrm0.tmp.vrm")
+	DirAccess.copy_absolute(path, copy)
+	if doc.append_from_file(copy, state) != OK:
 		why = "godot-vrm cannot read " + path.get_file()
 	else:
 		var root := doc.generate_scene(state)
@@ -355,6 +359,7 @@ func save_vrm1(path: String, out: String) -> String:
 		elif writer.write_to_filesystem(written, out) != OK:
 			why = "cannot write " + out
 		root.queue_free()
+	DirAccess.remove_absolute(copy)
 	for e in extensions:
 		GLTFDocument.unregister_gltf_document_extension(e)
 	return why

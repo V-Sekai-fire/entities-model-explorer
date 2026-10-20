@@ -65,8 +65,58 @@ func _unhandled_input(event):
 			self.scale_object_local(Vector3.ONE * (1 / ZOOM_FACTOR))
 
 
-func _on_root_gltf_is_loaded(_success, _gltf):
-	# Reset camera local scale
+# Start framing: a three-quarter view from a little above, with a longer lens, so the whole
+# model fills the free middle of the window (the panels cover the sides) with some headroom.
+const FRAME_FOV := 40.0
+const FRAME_YAW := 30.0
+const FRAME_PITCH := -12.0
+const FRAME_MARGIN := 1.15
+# Share of the window width between the information panel and the controls card.
+const FRAME_FREE_WIDTH := 0.55
+
+
+func _on_root_gltf_is_loaded(success, _gltf):
 	scale = Vector3.ONE
 	rotation.y = 0
 	CamRotHelper.rotation.x = 0
+	if not success:
+		return
+	# A frame later: the model is in the tree with its transforms set.
+	await get_tree().process_frame
+	frame_models()
+
+
+func frame_models() -> void:
+	var models: Array = get_tree().get_nodes_in_group(GlobalSignal.GLTF_GROUP)
+	models.append_array(get_tree().get_nodes_in_group(GlobalSignal.FBX_GROUP))
+	var box := AABB()
+	var first := true
+	for model in models:
+		for m in (model as Node).find_children("*", "MeshInstance3D", true, false):
+			var mi := m as MeshInstance3D
+			if mi.mesh == null:
+				continue
+			var b := mi.global_transform * mi.get_aabb()
+			box = b if first else box.merge(b)
+			first = false
+	if first:
+		return
+	var cam: Camera3D = CamRotHelper.get_node("Camera3D")
+	cam.fov = FRAME_FOV
+	var size := get_viewport().get_visible_rect().size
+	var aspect := size.x / maxf(size.y, 1.0)
+	var half_v := deg_to_rad(FRAME_FOV) * 0.5
+	var half_h := atan(tan(half_v) * aspect * FRAME_FREE_WIDTH)
+	# The box as seen from the yaw: its width across the view and its depth along it.
+	var yaw := deg_to_rad(FRAME_YAW)
+	var across := absf(cos(yaw)) * box.size.x + absf(sin(yaw)) * box.size.z
+	var along := absf(sin(yaw)) * box.size.x + absf(cos(yaw)) * box.size.z
+	var d := maxf(
+		0.5 * box.size.y * FRAME_MARGIN / tan(half_v), 0.5 * across * FRAME_MARGIN / tan(half_h)
+	)
+	d = maxf(d + 0.5 * along, 0.001)
+	position = box.get_center()
+	rotation = Vector3(0, yaw, 0)
+	CamRotHelper.rotation = Vector3(deg_to_rad(FRAME_PITCH), 0, 0)
+	scale = Vector3.ONE * (d / cam.position.z)
+	cam.near = maxf(d * 0.005, 0.0005)

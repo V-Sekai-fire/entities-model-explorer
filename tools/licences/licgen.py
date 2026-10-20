@@ -3,7 +3,7 @@
     python3 tools/licences/licgen.py <out dir>      -> <out>/skintokens/{LICENSE.md,NOTICE,CITATION.cff}
                                         <out>/kimodo-motion/{...}
 
-Both viewers ship the same pck contents (skintokens.elf, motion.elf, usd.elf, headfit.elf, mm.elf
+Both viewers ship the same pck contents (skintokens.elf, motion.elf, usd.elf, headfit.elf, mm.elf, liltoon.tar
 and its walk-mode clips, the 18 prompt
 embeddings); they differ only in the weights in w/. Licence texts in src/ are copied from each
 part's own repository; src/old-citations.yaml holds the reference entries of the two
@@ -88,6 +88,8 @@ PARTS = [
      None, "Kimodo-SOMA-RP-v1.1", None),
     ("[Model Explorer](" + GH + "V-Sekai-fire/entities-model-explorer) (the viewer)", "`{pck}`", "MIT",
      "Model Explorer", "Model Explorer", None),
+    ("[lilToon](" + GH + "lilxyzw/lilToon) by lilxyzw (toon shader files the asset package export adds to each "
+     "`.unitypackage`)", "`liltoon.tar` in `{pck}`", "MIT", "lilToon", "lilToon", None),
     ("[godot-vrm and Godot-MToon-Shader](" + GH + "V-Sekai/godot-vrm)", "in `{pck}`", "MIT",
      "godot-vrm and Godot-MToon-Shader", "godot-vrm and Godot-MToon-Shader", None),
     ("[interactor-usd-guest](" + GH + "V-Sekai-fire/interactor-usd-guest) (OpenUSD reader `usd.elf`)",
@@ -135,6 +137,7 @@ def sections(weights):
          ("interactor-motion-matching-guest", text_block("motion-matching-guest.LICENSE")),
          ("O3DE MotionMatching gem clips (MIT)", text_block("o3de.MIT.LICENSE")),
          ("Model Explorer", text_block("Model_Explorer.md")),
+         ("lilToon", text_block("liltoon.LICENSE")),
          ("godot-vrm and Godot-MToon-Shader", text_block("godot_vrm_and_Godot_MToon_Shader.md")),
          ("interactor-usd-guest", text_block("interactor_usd_guest.md")),
          ("Godot Engine", text_block("Godot_Engine.md")),
@@ -220,6 +223,11 @@ def refs_table():
         "type": "software", "title": "O3DE MotionMatching gem", "authors": [{"name": "Contributors to the Open 3D Engine"}],
         "repository-code": GH + "o3de/o3de/tree/development/Gems/MotionMatching", "license": "MIT",
         "notes": "Apache-2.0 OR MIT, used under MIT. 21 motion-capture clips of the walk mode, moved onto the SOMA skeleton."}
+    refs["lilToon"] = {
+        "type": "software", "title": "lilToon", "authors": [{"alias": "lilxyzw"}],
+        "repository-code": GH + "lilxyzw/lilToon", "license": "MIT",
+        "notes": "Version 2.3.4, vendored in thirdparty/lilToon. Its shader files go into every .unitypackage "
+                 "that the asset package export writes."}
     r = refs["Llama-3-Kimodo-GGML (LLM2Vec encoder, Meta Llama 3)"]
     r["notes"] = ("Meta Llama 3 Community License. Made the 18 prompt embeddings in the pck ahead of time. "
                   "These inputs are the output of a program; no person wrote them. The downloads do not "

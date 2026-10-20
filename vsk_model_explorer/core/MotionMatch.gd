@@ -407,7 +407,17 @@ func _has_moves() -> bool:
 static func clip_keys() -> PackedStringArray:
 	var out := PackedStringArray()
 	for line in FileAccess.get_file_as_string(DIR.path_join("clips.tsv")).split("\n", false):
-		out.append(line.split("\t")[0])
+		out.append(line.split("	")[0])
+	return out
+
+
+# Which clips are loops: a steady gait cut to whole strides has "loop" in clips.tsv's second
+# column (its loop.txt in the clip data). Every other clip is a one-shot.
+static func clip_loops() -> Dictionary:
+	var out := {}
+	for line in FileAccess.get_file_as_string(DIR.path_join("clips.tsv")).split("\n", false):
+		var w := line.split("	")
+		out[w[0]] = w.size() > 1 and w[1] == "loop"
 	return out
 
 
@@ -488,10 +498,7 @@ func _bake() -> bool:
 			return false
 	_mm.vmcall("mm_clear")
 	_keys = clip_keys()
-	var loops := {}
-	for line in FileAccess.get_file_as_string(DIR.path_join("clips.tsv")).split("\n", false):
-		var w := line.split("\t")
-		loops[w[0]] = w.size() > 1 and w[1] == "loop"
+	var loops := clip_loops()
 	var soma := _soma()
 	for k in _keys:
 		var xf := FileAccess.get_file_as_bytes(DIR.path_join(k + ".f32")).to_float32_array()
@@ -620,10 +627,16 @@ func _prepare_clips() -> bool:
 		_to_scene(root_owner).affine_inverse() if root_owner is Node3D else Transform3D.IDENTITY
 	)
 	var interp := interpolation()
+	var loops := clip_loops()
+	var n_loop := 0
 	for k in _keys:
 		var anim := _player.get_animation(PREFIX + k)
 		if anim == null:
 			return _fail("the moves file has no clip %s" % k) != ""
+		# A loop plays on through its seam (mm.elf wraps its time; a cross-fade out of it keeps
+		# cycling, and makima reads its keys across the seam). A one-shot holds its last frame.
+		anim.loop_mode = Animation.LOOP_LINEAR if loops.get(k, false) else Animation.LOOP_NONE
+		n_loop += 1 if loops.get(k, false) else 0
 		if anim.has_meta("mm_root"):
 			continue
 		var h := anim.find_track(NodePath(_hips_path), Animation.TYPE_POSITION_3D)
@@ -644,6 +657,7 @@ func _prepare_clips() -> bool:
 					anim.track_set_interpolation_type(t, interp)
 		anim.set_meta("mm_root", true)
 	print("MOVE-INTERP %s" % ("makima" if interp != Animation.INTERPOLATION_CUBIC else "cubic"))
+	print("MOVE-LOOPS loops=%d one-shots=%d" % [n_loop, _keys.size() - n_loop])
 	return true
 
 
@@ -690,8 +704,13 @@ func _make_tree() -> bool:
 		_node = MotionMatchNode.new()
 	_node.mm = _mm
 	_node.names = PackedStringArray()
+	_node.lengths = PackedFloat32Array()
+	_node.loops = PackedByteArray()
 	for k in _keys:
 		_node.names.append(PREFIX + k)
+		var anim := _player.get_animation(PREFIX + k)
+		_node.lengths.append(anim.length)
+		_node.loops.append(1 if anim.loop_mode == Animation.LOOP_LINEAR else 0)
 	# AnimationNodeExtension is not a root node: it sits in a blend tree that feeds the output.
 	var blend := AnimationNodeBlendTree.new()
 	blend.add_node("motion_matching", _node)
@@ -1198,7 +1217,7 @@ func _run_test() -> void:
 	# MOVE_STEPS=course: run straight down the obstacle course (with --obstacle-course).
 	if only == "course":
 		plan = [["course", Vector2(0, 1), true, 26.0, 0.0, STAND, false]]
-	var ok := keys_ok
+	var ok := keys_ok and _test_loops()
 	for step in plan:
 		if only != "" and not step[0] in only.split(","):
 			continue
@@ -1347,6 +1366,7 @@ func _run_test() -> void:
 		ok = ok and good
 	if only != "":
 		_print_card()
+		print("MOVE-SEAMS %d" % _node.seams)
 		print("MOVE-VIDEO-DONE steps=%s" % only)
 		get_tree().quit(0)
 		return
@@ -1369,8 +1389,31 @@ func _run_test() -> void:
 			get_viewport().get_texture().get_image().save_png(shots + "-%s.png" % tap[0])
 		ok = ok and good
 	ok = await _test_stay() and ok
+	print("MOVE-SEAMS %d" % _node.seams)
 	print("MOVE-OK" if ok else "MOVE-FAIL")
 	get_tree().quit(0 if ok else 1)
+
+
+# Loops and one-shots are told apart: every clip clips.tsv marks "loop" plays as a loop
+# (LOOP_LINEAR) and every other as a one-shot (LOOP_NONE), and the package has both kinds. A
+# package built from clip data without loop.txt files has no loops and fails here.
+func _test_loops() -> bool:
+	var loops := clip_loops()
+	var want := 0
+	var wrong := PackedStringArray()
+	for k in _keys:
+		var is_loop: bool = loops.get(k, false)
+		want += 1 if is_loop else 0
+		var anim := _player.get_animation(PREFIX + k)
+		var mode := Animation.LOOP_LINEAR if is_loop else Animation.LOOP_NONE
+		if anim == null or anim.loop_mode != mode:
+			wrong.append(k)
+	var good := want > 0 and want < _keys.size() and wrong.is_empty()
+	print(
+		"MOVE-STEP loops loops=%d one-shots=%d wrong=%s %s"
+		% [want, _keys.size() - want, ",".join(wrong), "ok" if good else "BAD"]
+	)
+	return good
 
 
 # M off leaves the model where it stopped, facing the same way, and the next M goes on from there.

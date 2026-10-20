@@ -424,7 +424,9 @@ func add_asset_package(vrm_path: String) -> String:
 	var name := package_name(vrm_path)
 	var vendored := FileAccess.get_file_as_bytes(LILTOON_TAR)
 	if vendored.is_empty():
-		print("AUTO-RIG-ASSET-PACKAGE without lilToon: no ", LILTOON_TAR, " (tools/liltoon_pack.gd)")
+		print(
+			"AUTO-RIG-ASSET-PACKAGE without lilToon: no ", LILTOON_TAR, " (tools/liltoon_pack.gd)"
+		)
 	var pkg: PackedByteArray = ex.native_package(
 		vrm, name, ex.view_position(vrm), credits(vrm, name), vendored
 	)
@@ -442,7 +444,9 @@ func add_asset_package(vrm_path: String) -> String:
 		return ""
 	f.store_buffer(pkg)
 	f.close()
-	print("AUTO-RIG-ASSET-PACKAGE %s bytes=%d ms=%d" % [out, pkg.size(), Time.get_ticks_msec() - t0])
+	print(
+		"AUTO-RIG-ASSET-PACKAGE %s bytes=%d ms=%d" % [out, pkg.size(), Time.get_ticks_msec() - t0]
+	)
 	return out
 
 

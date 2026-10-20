@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://dvpfndtt8epxg"]
 
 [ext_resource type="Script" uid="uid://dpcclf00w64kc" path="res://vsk_model_explorer/core/ModelExplorer.gd" id="1_nw81i"]
-[ext_resource type="Shader" uid="uid://bfps158jgiepd" path="res://vsk_model_explorer/shader/Grid.gdshader" id="2_c212q"]
+[ext_resource type="Script" path="res://vsk_model_explorer/core/GridBalls.gd" id="2_c212q"]
 [ext_resource type="Script" uid="uid://wh6b347iy00j" path="res://vsk_model_explorer/core/CamController.gd" id="3_7quse"]
 [ext_resource type="Script" uid="uid://2xw6ahdkwk3r" path="res://vsk_model_explorer/core/UIController.gd" id="4_3e4pv"]
 [ext_resource type="Texture2D" uid="uid://dngs678q2vwu2" path="res://vsk_model_explorer/texture/T_ProgressCircle_BG.png" id="5_ki67k"]
@@ -25,14 +25,6 @@ sky = SubResource("Sky_h8kkh")
 auto_exposure_enabled = true
 auto_exposure_min_exposure_value = -4.0
 
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_k3w7f"]
-render_priority = 0
-shader = ExtResource("2_c212q")
-
-[sub_resource type="PlaneMesh" id="PlaneMesh_6snqc"]
-material = SubResource("ShaderMaterial_k3w7f")
-size = Vector2(10000, 10000)
-
 [sub_resource type="CameraAttributesPhysical" id="CameraAttributesPhysical_6umus"]
 auto_exposure_enabled = true
 
@@ -46,8 +38,8 @@ script = ExtResource("1_nw81i")
 environment = SubResource("Environment_5wpq0")
 camera_attributes = SubResource("CameraAttributesPhysical_4a23n")
 
-[node name="GizmoPlane" type="MeshInstance3D" parent="." unique_id=1191691593]
-mesh = SubResource("PlaneMesh_6snqc")
+[node name="GizmoPlane" type="MultiMeshInstance3D" parent="." unique_id=1191691593]
+script = ExtResource("2_c212q")
 
 [node name="CamController" type="Node3D" parent="." unique_id=557862534 node_paths=PackedStringArray("UiNode")]
 script = ExtResource("3_7quse")

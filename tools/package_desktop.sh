@@ -23,8 +23,11 @@
 #            interactor-headfit's ${HEADFIT_BRANCH:-main}, and writes where it came from to
 #            <out dir>/headfit.elf.source.txt
 #   MM_ELF   mm.elf (interactor-motion-matching-guest), the motion-matching controller (M)
+#   MUJOCO_ELF  mujoco.elf, double-precision build (mujoco-sandbox-demo project/plans/
+#            mujoco.double.elf), the obstacle course's colliders
 #   MM_DATA  that repo's clip dirs, ':'-separated (data/kimodo-locomotion:data/o3de-motionmatching):
-#            one dir per clip (transforms.f32, skeleton.txt, parents.txt), the controller's pose
+#            one dir per clip (transforms.f32, skeleton.txt, parents.txt, and loop.txt for a
+#            steady gait cut as a loop), the controller's pose
 #            database; written into res://motion/mm/
 #   NOTICES  dir with LICENSE.md, NOTICE and CITATION.cff for the viewer, as written by
 #            tools/licences/licgen.py and published in its HF download repo
@@ -83,13 +86,17 @@ E
     "$HEADFIT_ELF" || { echo "$HEADFIT_ELF is not a double-precision headfit.elf with hf_anime_shape"; exit 1; }
   cp "$HEADFIT_ELF" "$src/headfit.elf"
   cp "$MM_ELF" "$src/mm.elf"
+  python3 -c 'import sys; b = open(sys.argv[1], "rb").read(); sys.exit(0 if b"SBXV(\0\0\0" in b and b"mjc_player_band\0" in b else 1)' \
+    "$MUJOCO_ELF" || { echo "$MUJOCO_ELF is not a double-precision mujoco.elf with mjc_player_band"; exit 1; }
+  cp "$MUJOCO_ELF" "$src/mujoco.elf"
   mkdir -p "$src/motion/mm"
   first=""
   for set in $(echo "$MM_DATA" | tr ':' ' '); do
     for d in "$set"/*/; do
       k=$(basename "$d")
       cp "$d/transforms.f32" "$src/motion/mm/$k.f32"
-      echo "$k" >> "$src/motion/mm/clips.tsv"
+      [ ! -f "$d/phase.f32" ] || cp "$d/phase.f32" "$src/motion/mm/$k.phase.f32"
+      if [ -f "$d/loop.txt" ]; then printf '%s\tloop\n' "$k"; else echo "$k"; fi >> "$src/motion/mm/clips.tsv"
       [ -n "$first" ] || first=$d
     done
   done
@@ -102,7 +109,7 @@ E
     || { cat "$out/liltoon_pack.log"; exit 1; }
   "$G" --headless --path "$src" --export-pack Linux "$out/skintokens-viewer.pck" > "$out/export.log" 2>&1
   if grep -q "SCRIPT ERROR" "$out/export.log"; then echo "SCRIPT ERROR in export.log"; exit 1; fi
-  for f in skintokens.elf usd.elf motion.elf headfit.elf mm.elf liltoon.tar AssetPackageExport.sgd godot-riscv.gdextension AutoRig.gd FaceBlink.gd FaceRoles.gd UsdImport.gd Motion.gd MotionMatch.gd Bintr.gd clips.tsv walk.f32 mm/skeleton.txt; do
+  for f in skintokens.elf usd.elf motion.elf headfit.elf mm.elf liltoon.tar AssetPackageExport.sgd mujoco.elf colliders.json godot-riscv.gdextension AutoRig.gd FaceBlink.gd FaceRoles.gd UsdImport.gd Motion.gd MotionMatch.gd Bintr.gd clips.tsv walk.f32 mm/skeleton.txt; do
     grep -aq "$f" "$out/skintokens-viewer.pck" || { echo "pck lacks $f"; exit 1; }
   done
   echo "PCK-OK $(wc -c < "$out/skintokens-viewer.pck") bytes"

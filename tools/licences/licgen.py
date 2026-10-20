@@ -4,7 +4,7 @@
                                         <out>/kimodo-motion/{...}
 
 Both viewers ship the same pck contents (skintokens.elf, motion.elf, usd.elf, headfit.elf, mm.elf, liltoon.tar
-and its walk-mode clips, the 18 prompt
+and its walk-mode clips, mujoco.elf and the obstacle course, the 18 prompt
 embeddings); they differ only in the weights in w/. Licence texts in src/ are copied from each
 part's own repository; src/old-citations.yaml holds the reference entries of the two
 CITATION.cff files as first published. Upload the three files to each HF repo, then give that
@@ -86,6 +86,19 @@ PARTS = [
      "the Kimodo weights unless listed below",
      "`motion/mm/*.f32` in `{pck}`", "Output of a model under the NVIDIA Open Model License",
      None, "Kimodo-SOMA-RP-v1.1", None),
+    ("[mujoco-sandbox-demo](" + GH + "V-Sekai-fire/interactor-mujoco-sandbox-demo) (the obstacle course's "
+     "collisions, `mujoco.elf`)", "`mujoco.elf` in `{pck}`", "MIT", "mujoco-sandbox-demo", "mujoco-sandbox-demo", None),
+    ("[MuJoCo](" + GH + "google-deepmind/mujoco) 3.14.0 by Google DeepMind", "inside `mujoco.elf`", "Apache-2.0",
+     None, "MuJoCo", None),
+    ("[libccd](" + GH + "danfis/libccd)", "inside `mujoco.elf`", "BSD-3-Clause", "libccd", "libccd", None),
+    ("[Qhull](http://www.qhull.org)", "inside `mujoco.elf`", "Qhull licence", "Qhull", "Qhull", None),
+    ("[TinyXML-2](" + GH + "leethomason/tinyxml2)", "inside `mujoco.elf`", "Zlib", "TinyXML-2", "TinyXML-2", None),
+    ("[tinyobjloader](" + GH + "tinyobjloader/tinyobjloader)", "inside `mujoco.elf`", "MIT", "tinyobjloader",
+     "tinyobjloader", None),
+    ("[miniz](" + GH + "richgel999/miniz)", "inside `mujoco.elf`", "MIT", "miniz", "miniz", None),
+    ("[LodePNG](" + GH + "lvandeve/lodepng)", "inside `mujoco.elf`", "Zlib", "LodePNG", "LodePNG", None),
+    ("Grid balls from [xr-grid](" + GH + "V-Sekai/xr-grid) (the floor grid)", "in `{pck}`", "MIT", "xr-grid",
+     "xr-grid", None),
     ("[Model Explorer](" + GH + "V-Sekai-fire/entities-model-explorer) (the viewer)", "`{pck}`", "MIT",
      "Model Explorer", "Model Explorer", None),
     ("[lilToon](" + GH + "lilxyzw/lilToon) by lilxyzw (toon shader files the asset package export adds to each "
@@ -118,13 +131,14 @@ PARTS = [
      "Kimodo-SOMA-RP-v1.1 (NVIDIA Open Model License)", "Kimodo-SOMA-RP-v1.1", {"kimodo"}),
 ]
 
-APACHE_TITLE = ("skin-tokens-ggml, kimodo-ggml, motion-bricks-ggml, Kimodo and oneTBB "
+APACHE_TITLE = ("skin-tokens-ggml, kimodo-ggml, motion-bricks-ggml, Kimodo, MuJoCo and oneTBB "
                 "(Apache License 2.0)")
 
 # Licence-text sections in order: (title, body)
 def sections(weights):
     s = [("interactor-skintokens-guest", text_block("interactor_skintokens_guest.md")),
-         (APACHE_TITLE, "Kimodo: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\n\n"
+         (APACHE_TITLE, "Kimodo: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\n"
+          "MuJoCo: Copyright 2021 DeepMind Technologies Limited.\n\n"
           + text_block("skin_tokens_ggml_and_oneTBB.md")),
          ("skin-tokens-ggml NOTICE", text_block("skin_tokens_ggml_NOTICE.md")),
          ("kimodo-ggml NOTICE", text_block("kimodo-ggml.NOTICE")),
@@ -136,6 +150,14 @@ def sections(weights):
          ("interactor-headfit", text_block("headfit.LICENSE")),
          ("interactor-motion-matching-guest", text_block("motion-matching-guest.LICENSE")),
          ("O3DE MotionMatching gem clips (MIT)", text_block("o3de.MIT.LICENSE")),
+         ("mujoco-sandbox-demo", text_block("mujoco-sandbox-demo.LICENSE")),
+         ("libccd", text_block("libccd.BSD")),
+         ("Qhull", text_block("qhull.COPYING")),
+         ("TinyXML-2", text_block("tinyxml2.LICENSE")),
+         ("tinyobjloader", text_block("tinyobjloader.LICENSE")),
+         ("miniz", text_block("miniz.LICENSE")),
+         ("LodePNG", text_block("lodepng.LICENSE")),
+         ("xr-grid", text_block("xr-grid.LICENSE")),
          ("Model Explorer", text_block("Model_Explorer.md")),
          ("lilToon", text_block("liltoon.LICENSE")),
          ("godot-vrm and Godot-MToon-Shader", text_block("godot_vrm_and_Godot_MToon_Shader.md")),
@@ -228,6 +250,22 @@ def refs_table():
         "repository-code": GH + "lilxyzw/lilToon", "license": "MIT",
         "notes": "Version 2.3.4, vendored in thirdparty/lilToon. Its shader files go into every .unitypackage "
                  "that the asset package export writes."}
+    def soft(title, url, lic, notes, authors):
+        refs[title] = {"type": "software", "title": title, "authors": [{"name": a} for a in authors],
+                       "repository-code": url, "license": lic, "notes": notes}
+    refs["mujoco-sandbox-demo"] = {"type": "software", "title": "mujoco-sandbox-demo", "authors": [FIRE],
+                                   "repository-code": GH + "V-Sekai-fire/interactor-mujoco-sandbox-demo",
+                                   "license": "MIT", "notes": "mujoco.elf, the obstacle course's collisions."}
+    soft("MuJoCo", GH + "google-deepmind/mujoco", "Apache-2.0", "3.14.0 at 53197e6, inside mujoco.elf.",
+         ["Google DeepMind"])
+    soft("libccd", GH + "danfis/libccd", "BSD-3-Clause", "Inside mujoco.elf.", ["Daniel Fiser"])
+    soft("Qhull", "http://www.qhull.org", "LicenseRef-Qhull", "Inside mujoco.elf.", ["C.B. Barber", "The Geometry Center"])
+    soft("TinyXML-2", GH + "leethomason/tinyxml2", "Zlib", "Inside mujoco.elf.", ["Lee Thomason"])
+    soft("tinyobjloader", GH + "tinyobjloader/tinyobjloader", "MIT", "Inside mujoco.elf.", ["Syoyo Fujita"])
+    soft("miniz", GH + "richgel999/miniz", "MIT", "Inside mujoco.elf.", ["Rich Geldreich", "RAD Game Tools", "Valve Software"])
+    soft("LodePNG", GH + "lvandeve/lodepng", "Zlib", "Inside mujoco.elf.", ["Lode Vandevenne"])
+    soft("xr-grid", GH + "V-Sekai/xr-grid", "MIT", "The grid-ball shader and mesh (commit ff71e92), in the pck.",
+         ["V-Sekai Contributors"])
     r = refs["Llama-3-Kimodo-GGML (LLM2Vec encoder, Meta Llama 3)"]
     r["notes"] = ("Meta Llama 3 Community License. Made the 18 prompt embeddings in the pck ahead of time. "
                   "These inputs are the output of a program; no person wrote them. The downloads do not "

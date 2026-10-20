@@ -37,6 +37,11 @@ const MODE_NAMES := ["standing", "crouching", "crawling"]
 # The model stops within ARRIVE SOMA metres of the point.
 const TAP_SLOP := 12.0
 const ARRIVE := 0.3
+# mm.elf's velocity spring (mm_core Settings.halflife): after the asked speed drops to zero the
+# body still travels speed * SPRING_HALFLIFE / ln 2. Walking to a point eases the asked speed
+# down over that distance on a makima curve, which bends without going past its keys.
+const SPRING_HALFLIFE := 0.27
+var _approach: Animation
 # The controls card rows this adds; the status line repeats them while walking.
 # Keyboard and gamepad on one row each.
 const CARD_ROWS := [
@@ -48,7 +53,12 @@ const CARD_ROWS := [
 	["keys", ["Z"], "Z or pad Y", "Crawl"],
 	["keys", ["Space"], "Space or A", "Jump"],
 ]
-const HELP := "W A S D or click the floor walk, double click runs there, Shift run, C crouch, Z crawl, Space jump, M stop (gamepad: stick, RT, B, Y, A, Start)"
+# Short lines: one long line is wider than a 1280 px window and the card cuts it off.
+const HELP := (
+	"W A S D or click the floor: walk.   Double click: run there.   Shift: run.\n"
+	+ "C: crouch.   Z: crawl.   Space: jump.   M: stop.\n"
+	+ "Gamepad: stick, RT, B, Y, A, Start."
+)
 
 var source := ""
 var busy := false
@@ -75,6 +85,8 @@ var _pad_prev := {}
 var _origin := Vector3.ZERO
 var _clip := -1
 var _last_world := Vector3.ZERO
+# How far the course's walls have held the model back from where root motion put it.
+var _push := Vector3.ZERO
 var _test := false
 var _test_opened := false
 var _test_input := Vector2.ZERO
@@ -98,10 +110,27 @@ var _walk_after_rig := false
 var _keys_testing := false
 var _space_jumps := 0
 var _trace := OS.get_environment("MOVE_TRACE") != ""
+var grid: MetricGrid
+var course: ObstacleCourse
+# --orbit-video: the view circles the model at ORBIT_DEG_S while the walk keeps the input frame
+# of the camera it started with, so the walk goes where the test asks and only the view moves.
+const ORBIT_DEG_S := 24.0
+var _orbit := false
+var _orbit_cam: Camera3D
+var _input_cam: Camera3D
+var _orbit_rel := Transform3D.IDENTITY
+var _orbit_a := 0.0
 
 
 func _ready() -> void:
 	_test = "--move-quit" in OS.get_cmdline_user_args()
+	_orbit = "--orbit-video" in OS.get_cmdline_user_args()
+	grid = MetricGrid.new()
+	grid.name = "MetricGrid"
+	get_parent().add_child.call_deferred(grid)
+	course = ObstacleCourse.new()
+	course.name = "ObstacleCourse"
+	get_parent().add_child.call_deferred(course)
 	get_parent().gltf_is_loaded.connect(_on_loaded)
 	_helper = Motion.new()
 	_helper.status = func(t): say(t)
@@ -378,7 +407,17 @@ func _has_moves() -> bool:
 static func clip_keys() -> PackedStringArray:
 	var out := PackedStringArray()
 	for line in FileAccess.get_file_as_string(DIR.path_join("clips.tsv")).split("\n", false):
-		out.append(line.split("\t")[0])
+		out.append(line.split("	")[0])
+	return out
+
+
+# Which clips are loops: a steady gait cut to whole strides has "loop" in clips.tsv's second
+# column (its loop.txt in the clip data). Every other clip is a one-shot.
+static func clip_loops() -> Dictionary:
+	var out := {}
+	for line in FileAccess.get_file_as_string(DIR.path_join("clips.tsv")).split("\n", false):
+		var w := line.split("	")
+		out[w[0]] = w.size() > 1 and w[1] == "loop"
 	return out
 
 
@@ -459,13 +498,24 @@ func _bake() -> bool:
 			return false
 	_mm.vmcall("mm_clear")
 	_keys = clip_keys()
+	var loops := clip_loops()
 	var soma := _soma()
 	for k in _keys:
 		var xf := FileAccess.get_file_as_bytes(DIR.path_join(k + ".f32")).to_float32_array()
-		var r := str(_mm.vmcall("mm_add_clip", k, soma.names, soma.parents, xf, 30.0))
+		var r := str(
+			_mm.vmcall("mm_add_clip", k, soma.names, soma.parents, xf, 30.0, 1 if loops[k] else 0)
+		)
 		if not r.begins_with("ADDED"):
 			_fail(r)
 			return false
+		# The clip's learned gait phase, when the package has one.
+		var ph_path := DIR.path_join(k + ".phase.f32")
+		if FileAccess.file_exists(ph_path):
+			var ph := FileAccess.get_file_as_bytes(ph_path).to_float32_array()
+			r = str(_mm.vmcall("mm_clip_phase", _keys.find(k), ph))
+			if not r.begins_with("PHASE"):
+				_fail(r)
+				return false
 	var baked := str(_mm.vmcall("mm_bake"))
 	print("MOVE-BAKE ", baked)
 	if not baked.begins_with("BAKED"):
@@ -579,10 +629,16 @@ func _prepare_clips() -> bool:
 		_to_scene(root_owner).affine_inverse() if root_owner is Node3D else Transform3D.IDENTITY
 	)
 	var interp := interpolation()
+	var loops := clip_loops()
+	var n_loop := 0
 	for k in _keys:
 		var anim := _player.get_animation(PREFIX + k)
 		if anim == null:
 			return _fail("the moves file has no clip %s" % k) != ""
+		# A loop plays on through its seam (mm.elf wraps its time; a cross-fade out of it keeps
+		# cycling, and makima reads its keys across the seam). A one-shot holds its last frame.
+		anim.loop_mode = Animation.LOOP_LINEAR if loops.get(k, false) else Animation.LOOP_NONE
+		n_loop += 1 if loops.get(k, false) else 0
 		if anim.has_meta("mm_root"):
 			continue
 		var h := anim.find_track(NodePath(_hips_path), Animation.TYPE_POSITION_3D)
@@ -603,7 +659,27 @@ func _prepare_clips() -> bool:
 					anim.track_set_interpolation_type(t, interp)
 		anim.set_meta("mm_root", true)
 	print("MOVE-INTERP %s" % ("makima" if interp != Animation.INTERPOLATION_CUBIC else "cubic"))
+	print("MOVE-LOOPS loops=%d one-shots=%d" % [n_loop, _keys.size() - n_loop])
 	return true
+
+
+# Share of full speed to ask for with dist scene metres left to the point: 0 at the arrive
+# ring, 1 once the point is two stopping distances out (keys at 0, 1 and 2 stopping distances).
+func _approach_share(dist: float) -> float:
+	if _approach == null:
+		_approach = Animation.new()
+		var t := _approach.add_track(Animation.TYPE_VALUE)
+		var it := interpolation()
+		_approach.track_set_interpolation_type(
+			t, it if it != Animation.INTERPOLATION_CUBIC else Animation.INTERPOLATION_LINEAR
+		)
+		for k in [[0.0, 0.0], [1.0, 1.0], [2.0, 1.0]]:
+			_approach.track_insert_key(t, k[0], k[1])
+		_approach.length = 2.0
+	var top: float = _run_speed if _target_run else _walk_speed
+	var stop_m := top * _scale * SPRING_HALFLIFE / log(2.0)
+	var x: float = clamp((dist - ARRIVE * _scale) / max(stop_m, 1e-6), 0.0, 2.0)
+	return clamp(float(_approach.value_track_interpolate(0, x)), 0.0, 1.0)
 
 
 # Godot's makima track interpolation (engines from 2026-09-29 on); cubic on an older engine.
@@ -630,8 +706,13 @@ func _make_tree() -> bool:
 		_node = MotionMatchNode.new()
 	_node.mm = _mm
 	_node.names = PackedStringArray()
+	_node.lengths = PackedFloat32Array()
+	_node.loops = PackedByteArray()
 	for k in _keys:
 		_node.names.append(PREFIX + k)
+		var anim := _player.get_animation(PREFIX + k)
+		_node.lengths.append(anim.length)
+		_node.loops.append(1 if anim.loop_mode == Animation.LOOP_LINEAR else 0)
 	# AnimationNodeExtension is not a root node: it sits in a blend tree that feeds the output.
 	var blend := AnimationNodeBlendTree.new()
 	blend.add_node("motion_matching", _node)
@@ -907,6 +988,18 @@ func _begin() -> void:
 	on = true
 	add_to_group("walk_mode")
 	_last_world = _origin
+	_push = Vector3.ZERO
+	if course:
+		var vc := _view_cam()
+		course.place(_origin, -vc.global_transform.basis.z if vc else Vector3(0, 0, -1), _scale)
+	if grid:
+		grid.set_origin(_origin)
+		print(
+			(
+				"GRID-FLOOR walk floor y=%.3f old grid y=%.3f lowest bone y=%.3f scale=%.3f"
+				% [_origin.y, grid._plane_y0, _lowest_bone_y(), _scale]
+			)
+		)
 	say(HELP)
 
 
@@ -956,6 +1049,7 @@ func _process(delta: float) -> void:
 	# The right stick turns the camera.
 	# Walk to the tapped point unless a move key or the stick takes over.
 	var steer := Vector3.ZERO
+	var brake := 1.0
 	if input != Vector2.ZERO:
 		_clear_target()
 	elif _has_target:
@@ -966,6 +1060,7 @@ func _process(delta: float) -> void:
 		else:
 			steer = to.normalized()
 			running = running or _target_run
+			brake = _approach_share(to.length())
 	var cc0 := get_parent().get_node_or_null("CamController") as Node3D
 	var rx := Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
 	if cc0 and abs(rx) > 0.2 and not _test:
@@ -975,8 +1070,9 @@ func _process(delta: float) -> void:
 		_mode_speed[_mode] if _mode != STAND else (_run_speed if running else _walk_speed)
 	)
 	var speed := base * _scale * (1.0 if steer != Vector3.ZERO else input.length())
+	speed *= brake
 	# Camera-relative input in the scene: forward is away from the camera, on the floor.
-	var cam := get_viewport().get_camera_3d()
+	var cam := _view_cam()
 	var fwd := Vector3(0, 0, -1)
 	var right := Vector3(1, 0, 0)
 	# The test goes through the camera too, so it checks what a player sees.
@@ -1007,6 +1103,17 @@ func _process(delta: float) -> void:
 	# The root motion track holds the floor travel, so the model's origin is the character.
 	var turn: float = float(r[4]) - float(r[7])
 	var char_scene := Vector3(r[2], 0, r[3]).rotated(Vector3.UP, _phi) * _scale + _origin
+	# On the obstacle course the model stands on what is under it: up a step at once, down at a
+	# rate, so it drops off a ledge over a few frames rather than in one.
+	if course and course.visible:
+		# Walls block: the move slides along anything taller than a step, for the mode's height.
+		var raw := char_scene
+		char_scene = course.slide(_last_world, raw + _push, _mode, _scale)
+		_push = Vector3(char_scene.x - raw.x, 0, char_scene.z - raw.z)
+		var gy := course.ground(Vector3(char_scene.x, _last_world.y, char_scene.z), _origin.y)
+		char_scene.y = (
+			gy if gy >= _last_world.y else lerp(_last_world.y, gy, 1.0 - exp(-dt * 12.0))
+		)
 	_scene.transform = Transform3D(Basis(Vector3.UP, turn), char_scene)
 	if _trace:
 		var hb := _skeleton.find_bone(_hips_path.get_slice(":", 1))
@@ -1030,7 +1137,17 @@ func _process(delta: float) -> void:
 	if cc:
 		cc.position += char_scene - _last_world
 	_last_world = char_scene
-	var label := "Walk mode, %s%s: %s" % [MODE_NAMES[_mode], ", jumping" if _jumping else "", HELP]
+	if grid:
+		grid.track(char_scene, _hips_world())
+	if _orbit_cam and cc:
+		_orbit_a += deg_to_rad(ORBIT_DEG_S) * dt
+		var c := cc.global_transform
+		_orbit_cam.global_transform = (
+			Transform3D(Basis(Vector3.UP, _orbit_a), c.origin)
+			* Transform3D(c.basis, Vector3.ZERO)
+			* _orbit_rel
+		)
+	var label := "Walk mode, %s%s\n%s" % [MODE_NAMES[_mode], ", jumping" if _jumping else "", HELP]
 	if status.is_valid():
 		status.call(label)
 
@@ -1073,7 +1190,14 @@ func _run_test() -> void:
 		var shifted := _node.names.slice(1)
 		shifted.append(_node.names[0])
 		_node.names = shifted
-	var keys_ok := await _key_test()
+	# MOVE_STEPS=walk,turn,run plays only those steps (for a video) and skips the key and tap
+	# tests; the run is then not judged as a whole.
+	var only := OS.get_environment("MOVE_STEPS")
+	var keys_ok := true if only != "" else await _key_test()
+	if grid:
+		grid.set_on(grid.visible or _orbit)
+	if _orbit:
+		_start_orbit()
 	var shots := OS.get_environment("MOVE_SHOT")
 	var cc := get_parent().get_node_or_null("CamController") as Node3D
 	if shots != "" and cc:
@@ -1092,8 +1216,13 @@ func _run_test() -> void:
 		["crawl", Vector2(0, 1), false, 6.0, 0.0, CRAWL, false],
 		["stand", Vector2.ZERO, false, 3.0, 0.0, STAND, false],
 	]
-	var ok := keys_ok
+	# MOVE_STEPS=course: run straight down the obstacle course (with --obstacle-course).
+	if only == "course":
+		plan = [["course", Vector2(0, 1), true, 26.0, 0.0, STAND, false]]
+	var ok := keys_ok and _test_loops()
 	for step in plan:
+		if only != "" and not step[0] in only.split(","):
+			continue
 		_test_input = step[1]
 		_test_run = step[2]
 		_test_mode = step[5]
@@ -1116,13 +1245,26 @@ func _run_test() -> void:
 		var leap := 0.0
 		# Judge the second half of each step: the first half is the change of direction.
 		var p0 := _last_world
+		var faces: Array[Vector2] = []
+		var face_at: Array = []
+		var step_frames := 0
 		while t < step[3]:
 			await get_tree().process_frame
 			var dt := get_process_delta_time()
 			t += dt
+			step_frames += 1
 			seen[_keys[_clip]] = true
 			jumped = jumped or _jumping
 			var hw := _hips_world()
+			# Counted from the step's start, so two runs print the same frames.
+			if step[0] == "course" and course and step_frames % 36 == 0:
+				var lc := course.to_local(_last_world)
+				print(
+					(
+						"COURSE-AT t=%.2f along=%.4f m height=%.4f m held=%.4f m"
+						% [t, -lc.z, lc.y, _push.length() / _scale]
+					)
+				)
 			var step_m := Vector2(hw.x - hips_prev.x, hw.z - hips_prev.z).length()
 			# In units of the longest honest frame step: running for the 1/20 s frame cap.
 			leap = max(leap, step_m / (_run_speed * _scale / 20.0))
@@ -1139,6 +1281,9 @@ func _run_test() -> void:
 			else:
 				kind_all += dt
 				kind_ok += dt if _kind == step[5] else 0.0
+				var f := _hips_forward()
+				faces.append(Vector2(f.x, f.z).normalized() * dt)
+				face_at.append([t, str(_keys[_clip])])
 		var moved: Vector3 = _last_world - p0
 		var secs: float = step[3] * 0.5
 		var speed: float = Vector2(moved.x, moved.z).length() / secs
@@ -1149,7 +1294,7 @@ func _run_test() -> void:
 				base = _run_speed if step[2] else _walk_speed
 			want = base * _scale
 		# Heading as the player sees it: 0 = away from the camera, 90 = to its right.
-		var cam := get_viewport().get_camera_3d()
+		var cam := _view_cam()
 		var cf := -cam.global_transform.basis.z if cam else Vector3(0, 0, -1)
 		cf = Vector3(cf.x, 0, cf.z).normalized()
 		var cr := Vector3(-cf.z, 0, cf.x)
@@ -1157,10 +1302,37 @@ func _run_test() -> void:
 		# Facing: the model's own forward (rest +Z turned by the scene) against the way it went.
 		# The hips carry the clip's own turn (root motion moves only the floor travel), so read
 		# the forward off the posed hips: the rest forward in the hips' frame, turned by the pose.
-		var face := _hips_forward()
+		# A stride swings the hips, so one frame depends on where the frame falls in the stride:
+		# judge the time-weighted mean over the judged half, and print the worst frame as well.
+		var mean_face := Vector2.ZERO
+		var face_worst := 0.0
+		var way := Vector2(moved.x, moved.z)
+		var worst_at := [0.0, ""]
+		for i in faces.size():
+			var f: Vector2 = faces[i]
+			mean_face += f
+			if way.length() > 0.01 and f.length() > 0.0:
+				var a: float = abs(rad_to_deg(way.angle_to(f)))
+				if a > face_worst:
+					face_worst = a
+					worst_at = face_at[i]
+		if step[0] == "run":
+			print(
+				(
+					"MOVE-FACE run worst=%.0f at=%.3fs of %.1fs clip=%s"
+					% [face_worst, worst_at[0], step[3], worst_at[1]]
+				)
+			)
+			for i in range(0, faces.size(), max(1, faces.size() / 24)):
+				print(
+					(
+						"MOVE-FACE t=%.3f off=%.0f clip=%s"
+						% [face_at[i][0], rad_to_deg(way.angle_to(faces[i])), face_at[i][1]]
+					)
+				)
 		var face_off: float = (
-			rad_to_deg(Vector2(moved.x, moved.z).angle_to(Vector2(face.x, face.z)))
-			if moved.length() > 0.01
+			rad_to_deg(way.angle_to(mean_face))
+			if moved.length() > 0.01 and mean_face.length() > 0.0
 			else 0.0
 		)
 		var off: float = abs(wrapf(heading - step[4], -180.0, 180.0))
@@ -1183,13 +1355,14 @@ func _run_test() -> void:
 		good = good and measured > 0 and pose_err < 0.02 and hips_off < 0.01 * _scale and leap < 1.5
 		print(
 			(
-				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f facing_off=%.0f leap=%.2f kind_share=%.2f air=%.2f pose_err=%.4f hips_off=%.4f clips=%s %s"
+				"MOVE-STEP %s speed=%.2f want=%.2f heading=%.0f facing_off=%.0f facing_worst=%.0f leap=%.2f kind_share=%.2f air=%.2f pose_err=%.4f hips_off=%.4f clips=%s %s"
 				% [
 					step[0],
 					speed,
 					want,
 					heading,
 					face_off,
+					face_worst,
 					leap,
 					share,
 					air,
@@ -1203,6 +1376,12 @@ func _run_test() -> void:
 		if shots != "":
 			get_viewport().get_texture().get_image().save_png(shots + "-%s.png" % step[0])
 		ok = ok and good
+	if only != "":
+		_print_card()
+		print("MOVE-SEAMS %d" % _node.seams)
+		print("MOVE-VIDEO-DONE steps=%s" % only)
+		get_tree().quit(0)
+		return
 	# Walk to a point: a real left click on the floor, sent through the input queue, then a double
 	# click to run. Pass = the model gets there and stops there.
 	var walked := 0.0
@@ -1222,8 +1401,33 @@ func _run_test() -> void:
 			get_viewport().get_texture().get_image().save_png(shots + "-%s.png" % tap[0])
 		ok = ok and good
 	ok = await _test_stay() and ok
+	print("MOVE-SEAMS %d" % _node.seams)
 	print("MOVE-OK" if ok else "MOVE-FAIL")
 	get_tree().quit(0 if ok else 1)
+
+
+# Loops and one-shots are told apart: every clip clips.tsv marks "loop" plays as a loop
+# (LOOP_LINEAR) and every other as a one-shot (LOOP_NONE), and the package has both kinds. A
+# package built from clip data without loop.txt files has no loops and fails here.
+func _test_loops() -> bool:
+	var loops := clip_loops()
+	var want := 0
+	var wrong := PackedStringArray()
+	for k in _keys:
+		var is_loop: bool = loops.get(k, false)
+		want += 1 if is_loop else 0
+		var anim := _player.get_animation(PREFIX + k)
+		var mode := Animation.LOOP_LINEAR if is_loop else Animation.LOOP_NONE
+		if anim == null or anim.loop_mode != mode:
+			wrong.append(k)
+	var good := want > 0 and want < _keys.size() and wrong.is_empty()
+	print(
+		(
+			"MOVE-STEP loops loops=%d one-shots=%d wrong=%s %s"
+			% [want, _keys.size() - want, ",".join(wrong), "ok" if good else "BAD"]
+		)
+	)
+	return good
 
 
 # M off leaves the model where it stopped, facing the same way, and the next M goes on from there.
@@ -1320,6 +1524,50 @@ func _hips_forward() -> Vector3:
 	return posed.basis.orthonormalized() * local
 
 
+# The camera the walk input and the heading are measured against: the starting camera while an
+# orbit video circles the view, else the current one.
+func _view_cam() -> Camera3D:
+	return _input_cam if _input_cam else get_viewport().get_camera_3d()
+
+
+func _lowest_bone_y() -> float:
+	var y := INF
+	if _skeleton:
+		for b in _skeleton.get_bone_count():
+			y = min(y, (_skeleton.global_transform * _skeleton.get_bone_global_pose(b)).origin.y)
+	return y
+
+
+func _start_orbit() -> void:
+	var cc := get_parent().get_node_or_null("CamController") as Node3D
+	_input_cam = get_viewport().get_camera_3d()
+	if cc == null or _input_cam == null:
+		return
+	var at := Transform3D(cc.global_transform.basis, cc.global_position)
+	_orbit_rel = at.affine_inverse() * _input_cam.global_transform
+	# Step back so the whole model and a few metres of grid are in view, and look down a bit more.
+	_orbit_rel.origin *= 2.5
+	_orbit_rel = Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-10.0)), Vector3.ZERO) * _orbit_rel
+	# The movie is the project's viewport size; a window whose title bar takes part of that gets
+	# scaled up and cropped at the sides (the help card lost its left edge). A borderless window
+	# of exactly the movie size records 1:1.
+	var w := get_window()
+	w.borderless = true
+	w.size = Vector2i(
+		ProjectSettings.get_setting("display/window/size/viewport_width"),
+		ProjectSettings.get_setting("display/window/size/viewport_height")
+	)
+	# The video shows the scene only: hide the panels and cards.
+	for n in get_parent().find_children("*", "Control", true, false):
+		if not n.get_parent() is Control:
+			(n as Control).visible = false
+	_orbit_cam = Camera3D.new()
+	_orbit_cam.fov = _input_cam.fov
+	_orbit_cam.far = _input_cam.far
+	get_parent().add_child(_orbit_cam)
+	_orbit_cam.make_current()
+
+
 func _hips_world() -> Vector3:
 	var b := _skeleton.find_bone(_hips_path.get_slice(":", 1))
 	return (_skeleton.global_transform * _skeleton.get_bone_global_pose(b)).origin
@@ -1375,3 +1623,13 @@ func _key_test() -> bool:
 		)
 	)
 	return good
+
+
+# Where the help card sits: CARD-OK when all of it is inside the window, else CARD-CLIPPED.
+func _print_card() -> void:
+	var ar = status.get_object() if status.is_valid() else null
+	if ar == null or not ar.has_method("card_rect"):
+		return
+	var r: Rect2 = ar.card_rect()
+	var win := get_viewport().get_visible_rect()
+	print("%s rect=%s window=%s" % ["CARD-OK" if win.encloses(r) else "CARD-CLIPPED", r, win.size])

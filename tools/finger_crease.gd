@@ -12,6 +12,7 @@ const THUMB_BEND := 40.0
 
 var rigid := false
 var ply := ""
+var override := ""
 
 
 func _initialize() -> void:
@@ -20,6 +21,8 @@ func _initialize() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a == "--rigid":
 			rigid = true
+		elif a.begins_with("--fist-from="):
+			override = a.trim_prefix("--fist-from=")
 		elif a.begins_with("--ply="):
 			ply = a.trim_prefix("--ply=")
 		elif a.begins_with("--json="):
@@ -207,8 +210,33 @@ func score(path: String) -> Dictionary:
 					tris.append_array([a, b, c])
 	if tris.is_empty():
 		return {"error": "no skinned triangles on the hands"}
+	if override != "":
+		# Fist positions from another deformer, keyed by the same welded rest position.
+		var grid := {}
+		for v in rest_v.size():
+			var c := Vector3i((rest_v[v] * 1e4).floor())
+			if not grid.has(c):
+				grid[c] = []
+			grid[c].append(v)
+		var f := FileAccess.open(override, FileAccess.READ)
+		var got := {}
+		while f.get_position() < f.get_length():
+			var r := Vector3(f.get_64(), f.get_64(), f.get_64()) * 1e-5
+			var p := Vector3(f.get_float(), f.get_float(), f.get_float())
+			var c := Vector3i((r * 1e4).floor())
+			for dx in [-1, 0, 1]:
+				for dy in [-1, 0, 1]:
+					for dz in [-1, 0, 1]:
+						for v in grid.get(c + Vector3i(dx, dy, dz), []):
+							if rest_v[v].distance_to(r) < 5e-5:
+								fist_v[v] = p
+								got[v] = true
+		var hit := got.size()
+		if hit != rest_v.size():
+			return {"error": "--fist-from covers %d of %d hand vertices" % [hit, rest_v.size()]}
 	if ply != "":
 		write_ply(ply, fist_v, tris)
+		write_ply(ply.get_basename() + ".rest.ply", rest_v, tris)
 	# Edge -> the faces on it, for the fold across each interior edge.
 	var nt := tris.size() / 3
 	var nr := PackedVector3Array()

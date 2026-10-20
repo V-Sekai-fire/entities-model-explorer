@@ -103,10 +103,23 @@ var _walk_after_rig := false
 var _keys_testing := false
 var _space_jumps := 0
 var _trace := OS.get_environment("MOVE_TRACE") != ""
+var grid: MetricGrid
+# --orbit-video: the view circles the model at ORBIT_DEG_S while the walk keeps the input frame
+# of the camera it started with, so the walk goes where the test asks and only the view moves.
+const ORBIT_DEG_S := 24.0
+var _orbit := false
+var _orbit_cam: Camera3D
+var _input_cam: Camera3D
+var _orbit_rel := Transform3D.IDENTITY
+var _orbit_a := 0.0
 
 
 func _ready() -> void:
 	_test = "--move-quit" in OS.get_cmdline_user_args()
+	_orbit = "--orbit-video" in OS.get_cmdline_user_args()
+	grid = MetricGrid.new()
+	grid.name = "MetricGrid"
+	get_parent().add_child.call_deferred(grid)
 	get_parent().gltf_is_loaded.connect(_on_loaded)
 	_helper = Motion.new()
 	_helper.status = func(t): say(t)
@@ -931,6 +944,14 @@ func _begin() -> void:
 	on = true
 	add_to_group("walk_mode")
 	_last_world = _origin
+	if grid:
+		grid.set_origin(_origin)
+		print(
+			(
+				"GRID-FLOOR walk floor y=%.3f old grid y=%.3f lowest bone y=%.3f scale=%.3f"
+				% [_origin.y, grid._plane_y0, _lowest_bone_y(), _scale]
+			)
+		)
 	say(HELP)
 
 
@@ -1003,7 +1024,7 @@ func _process(delta: float) -> void:
 	var speed := base * _scale * (1.0 if steer != Vector3.ZERO else input.length())
 	speed *= brake
 	# Camera-relative input in the scene: forward is away from the camera, on the floor.
-	var cam := get_viewport().get_camera_3d()
+	var cam := _view_cam()
 	var fwd := Vector3(0, 0, -1)
 	var right := Vector3(1, 0, 0)
 	# The test goes through the camera too, so it checks what a player sees.
@@ -1057,6 +1078,16 @@ func _process(delta: float) -> void:
 	if cc:
 		cc.position += char_scene - _last_world
 	_last_world = char_scene
+	if grid:
+		grid.track(char_scene, _hips_world())
+	if _orbit_cam and cc:
+		_orbit_a += deg_to_rad(ORBIT_DEG_S) * dt
+		var c := cc.global_transform
+		_orbit_cam.global_transform = (
+			Transform3D(Basis(Vector3.UP, _orbit_a), c.origin)
+			* Transform3D(c.basis, Vector3.ZERO)
+			* _orbit_rel
+		)
 	var label := "Walk mode, %s%s: %s" % [MODE_NAMES[_mode], ", jumping" if _jumping else "", HELP]
 	if status.is_valid():
 		status.call(label)
@@ -1100,7 +1131,14 @@ func _run_test() -> void:
 		var shifted := _node.names.slice(1)
 		shifted.append(_node.names[0])
 		_node.names = shifted
-	var keys_ok := await _key_test()
+	# MOVE_STEPS=walk,turn,run plays only those steps (for a video) and skips the key and tap
+	# tests; the run is then not judged as a whole.
+	var only := OS.get_environment("MOVE_STEPS")
+	var keys_ok := true if only != "" else await _key_test()
+	if grid:
+		grid.set_on(grid.visible or _orbit)
+	if _orbit:
+		_start_orbit()
 	var shots := OS.get_environment("MOVE_SHOT")
 	var cc := get_parent().get_node_or_null("CamController") as Node3D
 	if shots != "" and cc:
@@ -1121,6 +1159,8 @@ func _run_test() -> void:
 	]
 	var ok := keys_ok
 	for step in plan:
+		if only != "" and not step[0] in only.split(","):
+			continue
 		_test_input = step[1]
 		_test_run = step[2]
 		_test_mode = step[5]
@@ -1181,7 +1221,7 @@ func _run_test() -> void:
 				base = _run_speed if step[2] else _walk_speed
 			want = base * _scale
 		# Heading as the player sees it: 0 = away from the camera, 90 = to its right.
-		var cam := get_viewport().get_camera_3d()
+		var cam := _view_cam()
 		var cf := -cam.global_transform.basis.z if cam else Vector3(0, 0, -1)
 		cf = Vector3(cf.x, 0, cf.z).normalized()
 		var cr := Vector3(-cf.z, 0, cf.x)
@@ -1253,6 +1293,10 @@ func _run_test() -> void:
 		if shots != "":
 			get_viewport().get_texture().get_image().save_png(shots + "-%s.png" % step[0])
 		ok = ok and good
+	if only != "":
+		print("MOVE-VIDEO-DONE steps=%s" % only)
+		get_tree().quit(0)
+		return
 	# Walk to a point: a real left click on the floor, sent through the input queue, then a double
 	# click to run. Pass = the model gets there and stops there.
 	var walked := 0.0
@@ -1368,6 +1412,34 @@ func _hips_forward() -> Vector3:
 	var rest_fwd := _scene.global_transform.basis * (_to_scene(_skeleton).basis * Vector3.BACK)
 	var local := at_rest.basis.orthonormalized().inverse() * rest_fwd
 	return posed.basis.orthonormalized() * local
+
+
+# The camera the walk input and the heading are measured against: the starting camera while an
+# orbit video circles the view, else the current one.
+func _view_cam() -> Camera3D:
+	return _input_cam if _input_cam else get_viewport().get_camera_3d()
+
+
+func _lowest_bone_y() -> float:
+	var y := INF
+	if _skeleton:
+		for b in _skeleton.get_bone_count():
+			y = min(y, (_skeleton.global_transform * _skeleton.get_bone_global_pose(b)).origin.y)
+	return y
+
+
+func _start_orbit() -> void:
+	var cc := get_parent().get_node_or_null("CamController") as Node3D
+	_input_cam = get_viewport().get_camera_3d()
+	if cc == null or _input_cam == null:
+		return
+	var at := Transform3D(cc.global_transform.basis, cc.global_position)
+	_orbit_rel = at.affine_inverse() * _input_cam.global_transform
+	_orbit_cam = Camera3D.new()
+	_orbit_cam.fov = _input_cam.fov
+	_orbit_cam.far = _input_cam.far
+	get_parent().add_child(_orbit_cam)
+	_orbit_cam.make_current()
 
 
 func _hips_world() -> Vector3:

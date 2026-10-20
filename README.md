@@ -28,6 +28,17 @@ V-Sekai Model Explorer is a comprehensive 3D model viewer, designed with the pow
 4. **Double-Click Action**: Get a closer look at any part of the model with a simple double-click.
 5. **Wireframe/Explode/Hide Grid**: Press W for wireframe, E to take the model apart into its separate pieces and G to hide the grid; the controls card lists every key.
 
+## MCP server
+
+An MCP client (an AI agent) can open a model in the viewer, auto-rig it, and take the result. The tools are `status`, `load_model`, `auto_rig`, `get_file` and `screenshot`, plus read-only scene tools (`get_scene_tree`, `get_node`, `get_property`, `find_nodes`, `get_aabb`, `get_bone_poses`, `ping`). The server is `addons/vsekai_godot_mcp` (from V-Sekai-fire/transport-godot-mcp, trimmed in `project.godot`); the tools are `vsk_model_explorer/core/RigTools.gd`.
+
+The server runs in the desktop viewer; the web viewer does not have it.
+
+- stdio: start the viewer with `--quiet -- --mcp-stdio`.
+- HTTP: start the viewer with `-- --mcp-port=8789`. Streamable HTTP is at `http://127.0.0.1:8789/mcp`, and the older HTTP+SSE transport is at `/sse`.
+
+Every protocol version from 2024-11-05 to 2026-07-28 works. `tools/mcp_check.py` checks the desktop viewer with the MCP Python SDK.
+
 ## Release notes
 
 `.fbx`, `.vrm`, `.glb`, and `.gltf` files can be viewed.

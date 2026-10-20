@@ -58,6 +58,9 @@ ep.write_text(re.sub(r'custom_template/(release|debug)=""', lambda m: 'custom_te
 for f in list((work / 'addons/godot_sandbox').iterdir()):
     if f.is_file():
         f.unlink()
+# The MCP server is for the desktop viewer only: a web page cannot listen and has no stdin.
+shutil.rmtree(work / 'addons/vsekai_godot_mcp', ignore_errors=True)
+(work / 'vsk_model_explorer/core/RigTools.gd').unlink(missing_ok=True)
 # Scenes become procedures compiled into the guests (tscn2gd.py); the main scene is an empty Node
 # and the Boot autoload builds the app.
 r = subprocess.run([sys.executable, str(here / 'tscn2gd.py'), str(work)], capture_output=True, text=True)
@@ -66,6 +69,8 @@ if r.returncode:
     sys.exit('tscn2gd: ' + r.stderr.strip())
 pgp = work / 'project.godot'
 pg = pgp.read_text()
+pg = re.sub(r'^MCP=.*\n', '', pg, flags=re.M)
+pg = re.sub(r'\n\[vsekai_godot_mcp\]\n[\s\S]*?(?=\n\[|\Z)', '', pg)
 pg = re.sub(r'run/main_scene="[^"]*"', 'run/main_scene="res://boot.tscn"', pg)
 pg = re.sub(r'^(\[autoload\]\n\n(?:\w+=.*\n)*)', lambda m: m.group(1) + 'Boot="*res://boot.gd"\n', pg, count=1, flags=re.M)
 pg = re.sub(r'^\[editor_plugins\]\n\nenabled=.*\n', '', pg, flags=re.M)

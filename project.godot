@@ -22,6 +22,7 @@ config/windows_native_icon="res://vsk_model_explorer/resource/icon/app_icon.ico"
 
 GlobalSignal="*res://vsk_model_explorer/core/GlobalSignal.gd"
 MeshExt="*res://vsk_model_explorer/core/MeshExt.gd"
+MCP="*res://addons/vsekai_godot_mcp/mcp_runtime.gd"
 
 [display]
 
@@ -72,3 +73,12 @@ anti_aliasing/quality/msaa_2d=2
 anti_aliasing/quality/msaa_3d=2
 scaling_3d/scale=0.8
 anti_aliasing/quality/screen_space_aa=1
+
+[vsekai_godot_mcp]
+
+allow=PackedStringArray("ping", "get_scene_tree", "get_node", "get_property", "find_nodes", "get_aabb", "get_bone_poses")
+providers=PackedStringArray("res://vsk_model_explorer/core/RigTools.gd")
+server_name="skintokens-auto-rig"
+server_title="SkinTokens auto-rig"
+instructions="Open a model with load_model, rig it with auto_rig, then take the .vrm or .rigged.glb with get_file. screenshot shows the viewer. The scene tools only read."
+listen_by_default=false

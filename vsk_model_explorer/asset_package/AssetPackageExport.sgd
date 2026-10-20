@@ -45,6 +45,27 @@ const FROM_VRM := {"hips": "Hips", "spine": "Spine", "chest": "Chest", "upperChe
 	"leftToes": "LeftToes", "rightUpperLeg": "RightUpperLeg", "rightLowerLeg": "RightLowerLeg",
 	"rightFoot": "RightFoot", "rightToes": "RightToes", "leftEye": "LeftEye", "rightEye": "RightEye",
 	"jaw": "Jaw"}
+# Finger bones, in m_HandBoneIndex order (thumb, index, middle, ring, little; base to tip). These
+# are the editor's human names; VRM's thumb metacarpal is the editor's thumb proximal.
+const FINGERS := ["Thumb", "Index", "Middle", "Ring", "Little"]
+const PHALANGES := ["Proximal", "Intermediate", "Distal"]
+
+
+func finger_name(side: String, finger: int, k: int) -> String:
+	return "%s %s %s" % [side, FINGERS[finger], PHALANGES[k]]
+
+
+func finger_from_vrm() -> Dictionary:
+	var out := {}
+	for side in ["Left", "Right"]:
+		var low := side.to_lower()
+		for f in FINGERS.size():
+			var vrm_parts := ["Metacarpal", "Proximal", "Distal"] if f == 0 else PHALANGES
+			for k in 3:
+				out[low + FINGERS[f] + vrm_parts[k]] = finger_name(side, f, k)
+	return out
+
+
 # The bone whose direction a bone's axes follow, first one present wins.
 const CHILDREN := {"Hips": ["Spine"], "Spine": ["Chest", "UpperChest", "Neck"], "Chest": ["UpperChest", "Neck"],
 	"UpperChest": ["Neck"], "Neck": ["Head"], "LeftShoulder": ["LeftUpperArm"],
@@ -113,7 +134,60 @@ func axes_table() -> Dictionary:
 	t["RightLowerLeg"] = [-Y, X, Vector3(-1, 1, -1), la_min, la_max, bend]
 	t["RightFoot"] = [-Y, X, Vector3(1, -1, 1), f_min, f_max, Quaternion.IDENTITY]
 	t["RightToes"] = [Z, X, Vector3(1, 1, 1), toe_min, toe_max, Quaternion.IDENTITY]
+	finger_rows(t)
 	return t
+
+
+# Fingers, measured the same way from Avatars the editor built for the T-posed Tari in four
+# skeleton variants (as delivered, finger rotations scrambled, chains bent 25 and -15 degrees), all
+# agreeing to 3.2e-7. Frame: x toward the next joint of the finger (the distal keeps its parent's
+# direction), template z kept (+Y for the thumb, +Z for the others). Length: the distance to the
+# next joint; the distal's is 9/16 of its parent's. The zero-muscle frame is W F, with W a fixed
+# rotation in source-asset space (the 7th entry, so PreQ = R_parent^-1 W F); the right hand is the
+# left mirrored in x.
+func finger_rows(t: Dictionary) -> void:
+	var thumb_lim := [Vector3(0, -0.43633232, -0.34906584), Vector3(0, 0.43633232, 0.34906584)]
+	var curl_lim := [Vector3(0, 0, -0.6981317), Vector3(0, 0, 0.61086524)]
+	var bend_lim := [Vector3(0, 0, -0.7853982), Vector3(0, 0, 0.7853982)]
+	var spread := [0.34906584, 0.34906584, 0.1308997, 0.1308997, 0.34906584]
+	var bend := Quaternion(0, 0, 0.313377, 0.949629)
+	var base_w := [Quaternion(0, 0.123091, 0.123091, 0.984732), Quaternion(0, 0.076402, 0.286508, 0.955027),
+		Quaternion(0, 0.038285, 0.287137, 0.957124), Quaternion(0, -0.038285, 0.287137, 0.957124),
+		Quaternion(0, -0.076402, 0.286508, 0.955027)]
+	var base_sgn := [Vector3(-1, -1, 1), Vector3(-1, -1, -1), Vector3(-1, -1, -1), Vector3(-1, 1, -1),
+		Vector3(-1, 1, -1)]
+	for side in ["Left", "Right"]:
+		var m := 1.0 if side == "Left" else -1.0
+		for f in FINGERS.size():
+			var z := Vector3(0, 1, 0) if f == 0 else Vector3(0, 0, 1)
+			for k in 3:
+				var sgn: Vector3
+				var lo: Vector3
+				var hi: Vector3
+				var w: Quaternion
+				if k == 0:
+					sgn = base_sgn[f]
+					w = base_w[f]
+					if f == 0:
+						lo = thumb_lim[0]
+						hi = thumb_lim[1]
+					else:
+						lo = Vector3(0, -spread[f], -0.87266463)
+						hi = Vector3(0, spread[f], 0.87266463)
+				elif f == 0:
+					sgn = Vector3(-1, 1, 1)
+					w = Quaternion(0, -0.196116, 0, 0.980581)
+					lo = curl_lim[0]
+					hi = curl_lim[1]
+				else:
+					sgn = Vector3(-1, 1, -1)
+					w = bend
+					lo = bend_lim[0]
+					hi = bend_lim[1]
+				if m < 0:
+					sgn = Vector3(-sgn.x, sgn.y, -sgn.z)
+					w = Quaternion(w.x, -w.y, -w.z, w.w)
+				t[finger_name(side, f, k)] = [Vector3(-m, 0, 0), z, sgn, lo, hi, Quaternion.IDENTITY, w]
 
 
 # ---- glTF ----------------------------------------------------------------------------------
@@ -702,8 +776,21 @@ func avatar_yaml(nodes: Array, human: Dictionary) -> String:
 				direction = pos[c] - pos[n]
 				child_len = direction.length()
 				break
+		var finger: bool = row.size() > 6
 		var length := child_len
-		if n == "Head":
+		if finger:
+			var parts := n.split(" ")
+			var k := PHALANGES.find(parts[2])
+			if k < 2:
+				var next := "%s %s %s" % [parts[0], parts[1], PHALANGES[k + 1]]
+				if human.has(next):
+					direction = pos[next] - pos[n]
+			else:
+				var prev := "%s %s %s" % [parts[0], parts[1], PHALANGES[1]]
+				if human.has(prev):
+					direction = pos[n] - pos[prev]
+			length = direction.length() * (0.5625 if k == 2 else 1.0)
+		elif n == "Head":
 			length = (pos["Head"] - pos["Neck"]).length() if human.has("Neck") else 0.1
 		elif n.ends_with("Hand"):
 			var side := n.trim_suffix("Hand")
@@ -714,13 +801,15 @@ func avatar_yaml(nodes: Array, human: Dictionary) -> String:
 			var side := n.trim_suffix("Toes")
 			length = 0.25 * (pos[n] - pos[side + "Foot"]).length()
 		lengths[n] = length
-		var end := not CHILDREN.has(n)
+		var end := not CHILDREN.has(n) and not finger
 		var fr := axes_frame(row, end, direction)
 		frames[n] = fr
 		var rb := rot_of(nodes[i]["global"])
 		var rp := rot_of(nodes[hnodes[hparent[k]]]["global"])
 		var post := (rb.transposed() * fr).get_rotation_quaternion()
 		var pre := (rp.transposed() * fr * Basis(row[5] as Quaternion)).get_rotation_quaternion()
+		if finger:
+			pre = (rp.transposed() * Basis(row[6] as Quaternion) * fr).get_rotation_quaternion()
 		axes += ("            - m_PreQ: %s\n              m_PostQ: %s\n              m_Sgn: %s\n"
 			+ "              m_Limit:\n                m_Min: %s\n                m_Max: %s\n"
 			+ "              m_Length: %s\n              m_Type: 1\n") % [q4(pre), q4(post), v3(row[2]),
@@ -769,9 +858,19 @@ func avatar_yaml(nodes: Array, human: Dictionary) -> String:
 	var reverse := []
 	for i in nodes.size():
 		reverse.append(hindex[i] if hindex.has(i) else -1)
-	var hand := []
-	for k in 15:
-		hand.append(-1)
+	var hands := {}
+	var has_hand := {}
+	for side in ["Left", "Right"]:
+		var idx := []
+		for f in FINGERS.size():
+			for k in 3:
+				var fn := finger_name(side, f, k)
+				idx.append(hindex[human[fn]] if human.has(fn) else -1)
+		hands[side] = idx
+		has_hand[side] = 0
+		for i in idx:
+			if i >= 0:
+				has_hand[side] = 1
 	var s := HEADER + "--- !u!90 &9000000\nAvatar:\n  m_ObjectHideFlags: 0\n"
 	s += "  m_CorrespondingSourceObject: {fileID: 0}\n  m_PrefabInstance: {fileID: 0}\n"
 	s += "  m_PrefabAsset: {fileID: 0}\n  m_Name: %sAvatar\n  m_AvatarSize: 0\n" % nodes[0]["name"]
@@ -785,15 +884,15 @@ func avatar_yaml(nodes: Array, human: Dictionary) -> String:
 	s += "        m_Skeleton:\n          data:\n            m_Node:\n" + h_nodes
 	s += "            m_ID: %s\n            m_AxesArray:\n" % u32_hex(h_ids) + axes
 	s += "        m_SkeletonPose:\n          data:\n            m_X:\n" + h_poses
-	s += "        m_LeftHand:\n          data:\n            m_HandBoneIndex: %s\n" % i32_hex(hand)
-	s += "        m_RightHand:\n          data:\n            m_HandBoneIndex: %s\n" % i32_hex(hand)
+	s += "        m_LeftHand:\n          data:\n            m_HandBoneIndex: %s\n" % i32_hex(hands["Left"])
+	s += "        m_RightHand:\n          data:\n            m_HandBoneIndex: %s\n" % i32_hex(hands["Right"])
 	s += "        m_HumanBoneIndex: %s\n        m_HumanBoneMass:\n" % i32_hex(bone_index)
 	for line in mass:
 		s += line
 	s += "        m_Scale: %s\n        m_ArmTwist: 0.5\n        m_ForeArmTwist: 0.5\n" % f(root_t.y)
 	s += "        m_UpperLegTwist: 0.5\n        m_LegTwist: 0.5\n        m_ArmStretch: 0.05\n"
-	s += "        m_LegStretch: 0.05\n        m_FeetSpacing: 0\n        m_HasLeftHand: 0\n"
-	s += "        m_HasRightHand: 0\n        m_HasTDoF: 0\n"
+	s += "        m_LegStretch: 0.05\n        m_FeetSpacing: 0\n        m_HasLeftHand: %d\n" % has_hand["Left"]
+	s += "        m_HasRightHand: %d\n        m_HasTDoF: 0\n" % has_hand["Right"]
 	s += "    m_HumanSkeletonIndexArray: %s\n" % i32_hex(hnodes)
 	s += "    m_HumanSkeletonReverseIndexArray: %s\n" % i32_hex(reverse)
 	s += "    m_RootMotionBoneIndex: -1\n    m_RootMotionBoneX:\n      t: {x: 0, y: 0, z: 0}\n"
@@ -802,7 +901,12 @@ func avatar_yaml(nodes: Array, human: Dictionary) -> String:
 	s += "    m_RootMotionSkeletonPose:\n      data:\n        m_X: []\n    m_RootMotionSkeletonIndexArray: \n"
 	s += "  m_TOS:\n" + tos
 	s += "  m_HumanDescription:\n    serializedVersion: 3\n    m_Human:\n"
-	for n in HUMAN_BONES:
+	var described: Array = HUMAN_BONES.duplicate()
+	for side in ["Left", "Right"]:
+		for f in FINGERS.size():
+			for k in 3:
+				described.append(finger_name(side, f, k))
+	for n in described:
 		if human.has(n):
 			s += ("    - m_BoneName: %s\n      m_HumanName: %s\n      m_Limit:\n        m_Min: {x: 0, y: 0, z: 0}\n"
 				+ "        m_Max: {x: 0, y: 0, z: 0}\n        m_Value: {x: 0, y: 0, z: 0}\n"
@@ -1033,13 +1137,16 @@ func native_package(vrm: PackedByteArray, name: String, view: Vector3, credits: 
 	var index_of: Dictionary = built[1]
 	var human := {}
 	var bones: Dictionary = gltf["extensions"]["VRMC_vrm"]["humanoid"]["humanBones"]
+	var from_vrm := finger_from_vrm()
+	for b in FROM_VRM:
+		from_vrm[b] = FROM_VRM[b]
 	for b in bones:
-		if FROM_VRM.has(b):
+		if from_vrm.has(b):
 			var g := int(bones[b]["node"])
 			if not index_of.has(g):
 				last_error = "the %s bone is not a joint of the skin" % b
 				return PackedByteArray()
-			human[FROM_VRM[b]] = index_of[g]
+			human[from_vrm[b]] = index_of[g]
 	var mesh := build_mesh(gltf, bin, skin_index, nodes, index_of, built[2])
 	if mesh.is_empty():
 		return PackedByteArray()
@@ -1053,7 +1160,10 @@ func native_package(vrm: PackedByteArray, name: String, view: Vector3, credits: 
 	var mat_paths := {}
 	for m in materials:
 		var mname := str(gmats[m].get("name", "Material%d" % m)) if m < gmats.size() else "Material%d" % m
-		mat_paths[m] = dir + "/Materials/" + mname.validate_filename() + ".mat"
+		var mpath := dir + "/Materials/" + mname.validate_filename() + ".mat"
+		if mat_paths.values().has(mpath):  # two materials with one name keep separate files
+			mpath = dir + "/Materials/%s_%d.mat" % [mname.validate_filename(), m]
+		mat_paths[m] = mpath
 		guids["mat%d" % m] = guid_for(mat_paths[m])
 	var tar := PackedByteArray()
 	add(tar, dir, PackedByteArray(), folder_meta(guid_for(dir)), true)

@@ -195,12 +195,7 @@ func download(path: String, mime := "model/gltf-binary") -> void:
 		return
 	var bridge := Engine.get_singleton("JavaScriptBridge")
 	if bridge:
-		bridge.call(
-			"download_buffer",
-			FileAccess.get_file_as_bytes(path),
-			path.get_file(),
-			mime
-		)
+		bridge.call("download_buffer", FileAccess.get_file_as_bytes(path), path.get_file(), mime)
 		print("AUTO-RIG-DOWNLOAD ", path.get_file())
 
 
@@ -423,7 +418,9 @@ func add_unitypackage(vrm_path: String) -> String:
 		return ""
 	var vrm := FileAccess.get_file_as_bytes(vrm_path)
 	var name := package_name(vrm_path)
-	var pkg: PackedByteArray = ex.native_package(vrm, name, ex.view_position(vrm), credits(vrm, name))
+	var pkg: PackedByteArray = ex.native_package(
+		vrm, name, ex.view_position(vrm), credits(vrm, name)
+	)
 	if pkg.is_empty():
 		print("AUTO-RIG-UNITYPACKAGE skipped: ", ex.get("last_error"))
 		return ""
@@ -460,11 +457,21 @@ func credits(vrm: PackedByteArray, name: String) -> String:
 		if root is Dictionary:
 			meta = root.get("extensions", {}).get("VRMC_vrm", {}).get("meta", {})
 	var authors: Array = meta.get("authors", ["Unknown"])
-	var rig := "Rig from the source file" if source.get_extension().to_lower() == "vrm" \
+	var rig := (
+		"Rig from the source file"
+		if source.get_extension().to_lower() == "vrm"
 		else "Rigged by SkinTokens (skintokens.elf)"
-	return "%s\nby %s\n%s\nLicence: %s\n\n%s; converted by the SkinTokens viewer.\n" % [
-		extras.get("title", meta.get("name", name)), extras.get("author", ", ".join(authors)),
-		extras.get("source", ""), extras.get("license", meta.get("licenseUrl", "")), rig]
+	)
+	return (
+		"%s\nby %s\n%s\nLicence: %s\n\n%s; converted by the SkinTokens viewer.\n"
+		% [
+			extras.get("title", meta.get("name", name)),
+			extras.get("author", ", ".join(authors)),
+			extras.get("source", ""),
+			extras.get("license", meta.get("licenseUrl", "")),
+			rig
+		]
+	)
 
 
 static func glb_json_file(path: String) -> Dictionary:

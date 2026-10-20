@@ -1218,16 +1218,24 @@ func _run_test() -> void:
 		var p0 := _last_world
 		var faces: Array[Vector2] = []
 		var face_at: Array = []
+		var step_frames := 0
 		while t < step[3]:
 			await get_tree().process_frame
 			var dt := get_process_delta_time()
 			t += dt
+			step_frames += 1
 			seen[_keys[_clip]] = true
 			jumped = jumped or _jumping
 			var hw := _hips_world()
-			if step[0] == "course" and course and Engine.get_process_frames() % 36 == 0:
+			# Counted from the step's start, so two runs print the same frames.
+			if step[0] == "course" and course and step_frames % 36 == 0:
 				var lc := course.to_local(_last_world)
-				print("COURSE-AT t=%.2f along=%.2f m height=%.2f m held=%.2f m" % [t, -lc.z, lc.y, _push.length() / _scale])
+				print(
+					(
+						"COURSE-AT t=%.2f along=%.4f m height=%.4f m held=%.4f m"
+						% [t, -lc.z, lc.y, _push.length() / _scale]
+					)
+				)
 			var step_m := Vector2(hw.x - hips_prev.x, hw.z - hips_prev.z).length()
 			# In units of the longest honest frame step: running for the 1/20 s frame cap.
 			leap = max(leap, step_m / (_run_speed * _scale / 20.0))

@@ -949,6 +949,37 @@ func importer_meta(guid: String, importer: String, main_id: int) -> String:
 	return s + "  userData: \n  assetBundleName: \n  assetBundleVariant: \n"
 
 
+# A colour texture's TextureImporter settings, as the editor writes them for a new PNG/JPEG
+# (taken from an editor-written meta in lilToon 2.3.4). The short importer_meta form is not enough
+# here: without textureShape the editor imports the image as a Cubemap, which no _MainTex accepts.
+func texture_meta(guid: String) -> String:
+	var s := "fileFormatVersion: 2\nguid: %s\nTextureImporter:\n" % guid
+	s += "  internalIDToNameTable: []\n  externalObjects: {}\n  serializedVersion: 11\n"
+	s += "  mipmaps:\n    mipMapMode: 0\n    enableMipMap: 1\n    sRGBTexture: 1\n    linearTexture: 0\n"
+	s += "    fadeOut: 0\n    borderMipMap: 0\n    mipMapsPreserveCoverage: 0\n    alphaTestReferenceValue: 0.5\n"
+	s += "    mipMapFadeDistanceStart: 1\n    mipMapFadeDistanceEnd: 3\n"
+	s += "  bumpmap:\n    convertToNormalMap: 0\n    externalNormalMap: 0\n    heightScale: 0.25\n    normalMapFilter: 0\n"
+	s += "  isReadable: 0\n  streamingMipmaps: 1\n  streamingMipmapsPriority: 0\n  vTOnly: 0\n"
+	s += "  ignoreMasterTextureLimit: 0\n  grayScaleToAlpha: 0\n  generateCubemap: 6\n  cubemapConvolution: 0\n"
+	s += "  seamlessCubemap: 0\n  textureFormat: 1\n  maxTextureSize: 2048\n"
+	s += "  textureSettings:\n    serializedVersion: 2\n    filterMode: 1\n    aniso: 1\n    mipBias: 0\n"
+	s += "    wrapU: 0\n    wrapV: 0\n    wrapW: 0\n"
+	s += "  nPOTScale: 1\n  lightmap: 0\n  compressionQuality: 50\n  spriteMode: 0\n  spriteExtrude: 1\n"
+	s += "  spriteMeshType: 1\n  alignment: 0\n  spritePivot: {x: 0.5, y: 0.5}\n  spritePixelsToUnits: 100\n"
+	s += "  spriteBorder: {x: 0, y: 0, z: 0, w: 0}\n  spriteGenerateFallbackPhysicsShape: 1\n  alphaUsage: 1\n"
+	s += "  alphaIsTransparency: 1\n  spriteTessellationDetail: -1\n  textureType: 0\n  textureShape: 1\n"
+	s += "  singleChannelComponent: 0\n  flipbookRows: 1\n  flipbookColumns: 1\n  maxTextureSizeSet: 0\n"
+	s += "  compressionQualitySet: 0\n  textureFormatSet: 0\n  ignorePngGamma: 0\n  applyGammaDecoding: 0\n"
+	s += "  platformSettings:\n"
+	for target in ["DefaultTexturePlatform", "Standalone", "Android"]:
+		s += "  - serializedVersion: 3\n    buildTarget: %s\n    maxTextureSize: 2048\n" % target
+		s += "    resizeAlgorithm: 0\n    textureFormat: -1\n    textureCompression: 1\n    compressionQuality: 50\n"
+		s += "    crunchedCompression: 0\n    allowsAlphaSplitting: 0\n    overridden: 0\n"
+		s += "    androidETC2FallbackOverride: 0\n    forceMaximumCompressionQuality_BC6H_BC7: 0\n"
+	s += "  spritePackingTag: \n  pSDRemoveMatte: 0\n  pSDShowRemoveMatteOption: 0\n"
+	return s + "  userData: \n  assetBundleName: \n  assetBundleVariant: \n"
+
+
 func folder_meta(guid: String) -> String:
 	return ("fileFormatVersion: 2\nguid: %s\nfolderAsset: yes\nDefaultImporter:\n  externalObjects: {}\n"
 		+ "  userData: \n  assetBundleName: \n  assetBundleVariant: \n") % guid
@@ -1050,7 +1081,7 @@ func native_package(vrm: PackedByteArray, name: String, view: Vector3, credits: 
 			if written.is_empty():
 				add(tar, dir + "/Textures", PackedByteArray(), folder_meta(guid_for(dir + "/Textures")), true)
 			add(tar, tpath, bin.slice(off, off + int(bv["byteLength"])),
-				importer_meta(guid_for(tpath), "TextureImporter", 2800000), false)
+				texture_meta(guid_for(tpath)), false)
 			written[im] = guid_for(tpath)
 		tex_of[m] = written[im]
 	add(tar, paths["mesh"], mesh_yaml(mesh, name, materials).to_utf8_buffer(),

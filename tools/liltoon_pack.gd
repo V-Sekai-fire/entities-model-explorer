@@ -10,7 +10,7 @@ extends SceneTree
 # `control` leaves the lilToon shader out, and must fail.
 const SRC := "res://thirdparty/lilToon/Assets"
 const OUT := "res://vsk_model_explorer/liltoon.tar"
-const UNITYPACKAGE := "res://vsk_model_explorer/core/UnitypackageExport.sgd"
+const UNITYPACKAGE := "res://vsk_model_explorer/unitypackage/UnitypackageExport.sgd"
 # lts, lts_cutout, lts_trans: the shaders UnitypackageExport.sgd writes into materials.
 const SHADERS := [
 	"df12117ecd77c31469c224178886498e",

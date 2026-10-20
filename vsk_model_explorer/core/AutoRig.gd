@@ -32,7 +32,7 @@ const ELF := "res://skintokens.elf"
 const VrmExport := preload("res://vsk_model_explorer/core/VrmExport.gd")
 const FaceBlink := preload("res://vsk_model_explorer/core/FaceBlink.gd")
 # Loaded when used: the .sgd compiles only where the godot-sandbox library is present.
-const UNITYPACKAGE := "res://vsk_model_explorer/core/UnitypackageExport.sgd"
+const UNITYPACKAGE := "res://vsk_model_explorer/unitypackage/UnitypackageExport.sgd"
 # tools/liltoon_pack.gd writes it (package_desktop.sh pck runs it before the export).
 const LILTOON_TAR := "res://vsk_model_explorer/liltoon.tar"
 const WAIT_GPU := 1

@@ -2,7 +2,9 @@
 # Copyright (c) 2021-present Lyuma <xn.lyuma@gmail.com> and contributors
 # SPDX-License-Identifier: MIT
 # SkinTokens' .unitypackage export (AutoRig.gd runs it for every saved .vrm). This file is the one
-# copy: it came from the chibifire-stages/unidot_importer fork, whose export_avatar.gd consumes it.
+# copy: it came from the chibifire-stages/unidot_importer fork, whose export_avatar.gd consumes it as
+# a git subtree of this folder alone (branch split/unitypackage-export, `git subtree split --prefix=
+# vsk_model_explorer/unitypackage`), so keep this folder to this file.
 # A VRM 1.0 (T-posed, glTF space) becomes text YAML source assets in a
 # .unitypackage, so the target project needs nothing but the avatar descriptor's SDK:
 #   <Name>.prefab        GameObjects, Transforms, a SkinnedMeshRenderer, an Animator and a

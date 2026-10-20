@@ -502,7 +502,9 @@ func _bake() -> bool:
 	var soma := _soma()
 	for k in _keys:
 		var xf := FileAccess.get_file_as_bytes(DIR.path_join(k + ".f32")).to_float32_array()
-		var r := str(_mm.vmcall("mm_add_clip", k, soma.names, soma.parents, xf, 30.0, 1 if loops[k] else 0))
+		var r := str(
+			_mm.vmcall("mm_add_clip", k, soma.names, soma.parents, xf, 30.0, 1 if loops[k] else 0)
+		)
 		if not r.begins_with("ADDED"):
 			_fail(r)
 			return false
@@ -1315,9 +1317,19 @@ func _run_test() -> void:
 					face_worst = a
 					worst_at = face_at[i]
 		if step[0] == "run":
-			print("MOVE-FACE run worst=%.0f at=%.3fs of %.1fs clip=%s" % [face_worst, worst_at[0], step[3], worst_at[1]])
+			print(
+				(
+					"MOVE-FACE run worst=%.0f at=%.3fs of %.1fs clip=%s"
+					% [face_worst, worst_at[0], step[3], worst_at[1]]
+				)
+			)
 			for i in range(0, faces.size(), max(1, faces.size() / 24)):
-				print("MOVE-FACE t=%.3f off=%.0f clip=%s" % [face_at[i][0], rad_to_deg(way.angle_to(faces[i])), face_at[i][1]])
+				print(
+					(
+						"MOVE-FACE t=%.3f off=%.0f clip=%s"
+						% [face_at[i][0], rad_to_deg(way.angle_to(faces[i])), face_at[i][1]]
+					)
+				)
 		var face_off: float = (
 			rad_to_deg(way.angle_to(mean_face))
 			if moved.length() > 0.01 and mean_face.length() > 0.0
@@ -1410,8 +1422,10 @@ func _test_loops() -> bool:
 			wrong.append(k)
 	var good := want > 0 and want < _keys.size() and wrong.is_empty()
 	print(
-		"MOVE-STEP loops loops=%d one-shots=%d wrong=%s %s"
-		% [want, _keys.size() - want, ",".join(wrong), "ok" if good else "BAD"]
+		(
+			"MOVE-STEP loops loops=%d one-shots=%d wrong=%s %s"
+			% [want, _keys.size() - want, ",".join(wrong), "ok" if good else "BAD"]
+		)
 	)
 	return good
 

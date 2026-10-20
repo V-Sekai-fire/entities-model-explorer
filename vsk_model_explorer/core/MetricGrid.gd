@@ -55,8 +55,11 @@ func track(root: Vector3, hips: Vector3) -> void:
 
 
 func _build() -> void:
-	for a in [[Vector3.RIGHT, Color(1, 0.15, 0.15), "X"], [Vector3.UP, Color(0.2, 1, 0.2), "Y"],
-			[Vector3.BACK, Color(0.25, 0.45, 1), "Z"]]:
+	for a in [
+		[Vector3.RIGHT, Color(1, 0.15, 0.15), "X"],
+		[Vector3.UP, Color(0.2, 1, 0.2), "Y"],
+		[Vector3.BACK, Color(0.25, 0.45, 1), "Z"]
+	]:
 		var bar := MeshInstance3D.new()
 		var box := BoxMesh.new()
 		box.size = Vector3.ONE * 0.02 + a[0] * 0.98

@@ -22,7 +22,9 @@ var player := -1
 func _initialize() -> void:
 	var a := OS.get_cmdline_user_args()
 	if a.size() < 3:
-		printerr("COLLIDERS-FAIL usage: -- <mujoco.elf> <colliders.json> <course.stl> [--plant-box NAME]")
+		printerr(
+			"COLLIDERS-FAIL usage: -- <mujoco.elf> <colliders.json> <course.stl> [--plant-box NAME]"
+		)
 		quit(2)
 		return
 	var plant := ""
@@ -42,8 +44,14 @@ func _initialize() -> void:
 	var prims := PackedFloat64Array()
 	for c in cols:
 		prims.append_array(PackedFloat64Array(c.prim))
-	var n = sb.vmcall("mjc_load_primitives", prims, PackedFloat64Array([0.0, 0.01, 0.0, 0.01]), 2, 2,
-		PackedFloat64Array([1.0, 1.0, 10000.0, 10000.0]))
+	var n = sb.vmcall(
+		"mjc_load_primitives",
+		prims,
+		PackedFloat64Array([0.0, 0.01, 0.0, 0.01]),
+		2,
+		2,
+		PackedFloat64Array([1.0, 1.0, 10000.0, 10000.0])
+	)
 	if typeof(n) != TYPE_INT or n < 0:
 		printerr("COLLIDERS-FAIL mujoco.elf refused the colliders")
 		quit(1)
@@ -60,8 +68,17 @@ func _initialize() -> void:
 	await physics_frame
 	await physics_frame
 	space = get_root().get_world_3d().direct_space_state
-	print("COLLIDERS loaded %d pieces as %d geoms; surface %d triangles%s" % [
-		cols.size(), n, tri.get_faces().size() / 3, ("; planted a box for " + plant) if plant else ""])
+	print(
+		(
+			"COLLIDERS loaded %d pieces as %d geoms; surface %d triangles%s"
+			% [
+				cols.size(),
+				n,
+				tri.get_faces().size() / 3,
+				("; planted a box for " + plant) if plant else ""
+			]
+		)
+	)
 	var bad := []
 	var rays := 0
 	var worst := 0.0
@@ -93,8 +110,12 @@ func _initialize() -> void:
 	bad.sort_custom(func(p, q): return p[0] > q[0])
 	for b in bad.slice(0, 6):
 		print("COLLIDERS-MISS %.3f m at %s dir %s: surface %s, mujoco %s" % b)
-	print("%s rays=%d misses=%d worst=%.4f m (tolerance %.3f m)" % [
-		"COLLIDERS-OK" if bad.is_empty() else "COLLIDERS-FAIL", rays, bad.size(), worst, TOL])
+	print(
+		(
+			"%s rays=%d misses=%d worst=%.4f m (tolerance %.3f m)"
+			% ["COLLIDERS-OK" if bad.is_empty() else "COLLIDERS-FAIL", rays, bad.size(), worst, TOL]
+		)
+	)
 	quit(0 if bad.is_empty() else 1)
 
 
@@ -104,8 +125,13 @@ func _cmp(o: Vector3, d: Vector3, len: float, bad: Array) -> float:
 	q.hit_back_faces = true
 	var h := space.intersect_ray(q)
 	var gd: float = (h.position - o).length() if h else -1.0
-	var r = sb.vmcall("mjc_ray", PackedFloat64Array([o.x, o.y, o.z]), PackedFloat64Array([d.x, d.y, d.z]),
-		len, player)
+	var r = sb.vmcall(
+		"mjc_ray",
+		PackedFloat64Array([o.x, o.y, o.z]),
+		PackedFloat64Array([d.x, d.y, d.z]),
+		len,
+		player
+	)
 	var md: float = r[1] if r[0] == 1.0 else -1.0
 	var diff := absf(gd - md) if (gd >= 0.0) == (md >= 0.0) else len
 	if diff > TOL:

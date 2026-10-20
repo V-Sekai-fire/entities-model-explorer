@@ -83,6 +83,8 @@ func _ball_mesh() -> ArrayMesh:
 			[Vector3(0, -0.5, 0), Vector3(0, 0.5, 0), Vector3(1, -0.5, 0), Vector3(1, 0.5, 0)]
 		)
 		arrays[Mesh.ARRAY_NORMAL] = PackedVector3Array([axis, axis, axis, axis])
-		arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array([Vector2(1, 0), Vector2(1, 0), Vector2(1, 0), Vector2(1, 0)])
+		arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array(
+			[Vector2(1, 0), Vector2(1, 0), Vector2(1, 0), Vector2(1, 0)]
+		)
 		m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLE_STRIP, arrays)
 	return m

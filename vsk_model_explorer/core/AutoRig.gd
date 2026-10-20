@@ -136,7 +136,16 @@ func show_status(text: String) -> void:
 	var font := _label.get_theme_font("font")
 	var widest := 0.0
 	for line in text.split("\n"):
-		widest = max(widest, font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, _label.get_theme_font_size("font_size")).x)
+		widest = max(
+			widest,
+			(
+				font
+				. get_string_size(
+					line, HORIZONTAL_ALIGNMENT_LEFT, -1, _label.get_theme_font_size("font_size")
+				)
+				. x
+			)
+		)
 	_label.custom_minimum_size.x = min(widest + 2.0, room)
 	_label.get_parent().reset_size()
 	_label.get_parent().visible = text != ""

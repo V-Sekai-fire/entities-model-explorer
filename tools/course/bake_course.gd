@@ -45,7 +45,9 @@ func _initialize() -> void:
 	var t0 := Time.get_ticks_msec()
 	var r = sandbox.vmcall("solid_script", text)
 	if typeof(r) != TYPE_ARRAY or r.size() != 3 or not r[0]:
-		printerr("COURSE-FAIL solid_script: ", r[1] if typeof(r) == TYPE_ARRAY and r.size() > 1 else r)
+		printerr(
+			"COURSE-FAIL solid_script: ", r[1] if typeof(r) == TYPE_ARRAY and r.size() > 1 else r
+		)
 		quit(1)
 		return
 	var tris := 0
@@ -60,7 +62,12 @@ func _initialize() -> void:
 		printerr("COURSE-FAIL could not write ", args[2])
 		quit(1)
 		return
-	print("COURSE-OK bodies=%d triangles=%d ms=%d out=%s" % [names.size(), tris, Time.get_ticks_msec() - t0, args[2].get_file()])
+	print(
+		(
+			"COURSE-OK bodies=%d triangles=%d ms=%d out=%s"
+			% [names.size(), tris, Time.get_ticks_msec() - t0, args[2].get_file()]
+		)
+	)
 	print("COURSE-BODIES ", ", ".join(names))
 	quit(0)
 

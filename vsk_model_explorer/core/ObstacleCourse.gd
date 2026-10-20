@@ -92,8 +92,13 @@ func ground(p: Vector3, floor_y: float) -> float:
 	if not visible or not _ready_for(_band if _band >= 0 else 0):
 		return floor_y
 	var top := p.y + STEP_UP * _scale
-	var r = _sb.vmcall("mjc_ray", PackedFloat64Array([p.x, top, p.z]), PackedFloat64Array([0.0, -1.0, 0.0]),
-		top - floor_y + 1.0, _player)
+	var r = _sb.vmcall(
+		"mjc_ray",
+		PackedFloat64Array([p.x, top, p.z]),
+		PackedFloat64Array([0.0, -1.0, 0.0]),
+		top - floor_y + 1.0,
+		_player
+	)
 	if typeof(r) == TYPE_PACKED_FLOAT64_ARRAY and r.size() == 9 and r[0] == 1.0:
 		return maxf(floor_y, r[3])
 	return floor_y
@@ -135,12 +140,34 @@ func _ready_for(mode: int) -> bool:
 		var p: Array = c.prim
 		var at := t * Vector3(p[1], p[2], p[3])
 		var q := turn * Quaternion(p[8], p[9], p[10], p[7])
-		out.append_array(PackedFloat64Array([p[0], at.x, at.y, at.z, p[4] * _scale, p[5] * _scale,
-			p[6] * _scale, q.w, q.x, q.y, q.z, 0.0]))
+		out.append_array(
+			PackedFloat64Array(
+				[
+					p[0],
+					at.x,
+					at.y,
+					at.z,
+					p[4] * _scale,
+					p[5] * _scale,
+					p[6] * _scale,
+					q.w,
+					q.x,
+					q.y,
+					q.z,
+					0.0
+				]
+			)
+		)
 	var s := _scale
 	_sb.vmcall("mjc_player_band", BODY_RADIUS * s, STEP_UP * s, float(BODY_HEIGHT[mode]) * s)
-	var n = _sb.vmcall("mjc_load_primitives", out, PackedFloat64Array([0.0, 0.01, 0.0, 0.01]), 2, 2,
-		PackedFloat64Array([1.0, 1.0, 1e5, 1e5]))
+	var n = _sb.vmcall(
+		"mjc_load_primitives",
+		out,
+		PackedFloat64Array([0.0, 0.01, 0.0, 0.01]),
+		2,
+		2,
+		PackedFloat64Array([1.0, 1.0, 1e5, 1e5])
+	)
 	if typeof(n) != TYPE_INT or n < 0:
 		push_error("mujoco.elf refused the course colliders")
 		_prims = []
@@ -163,7 +190,9 @@ func _build() -> void:
 		_prims = j.get("colliders", [])
 		_sb = preload("res://vsk_model_explorer/core/Bintr.gd").make(self, MUJOCO_ELF, 256, 4096)
 	else:
-		push_error("obstacle course colliders need %s, %s and godot-sandbox" % [COLLIDERS, MUJOCO_ELF])
+		push_error(
+			"obstacle course colliders need %s, %s and godot-sandbox" % [COLLIDERS, MUJOCO_ELF]
+		)
 	for m in _course.get_children():
 		var mi := m as MeshInstance3D
 		if mi == null or not SIGNS.has(str(mi.name)):

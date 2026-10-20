@@ -53,7 +53,10 @@ func _process_animation_node(
 	var seeked := false
 	# mm.elf wraps a loop's time at its seam: that is play going on, not a seek.
 	var wrapped: bool = (
-		picked == clip and r[8] <= 0.5 and is_loop(clip) and t < time
+		picked == clip
+		and r[8] <= 0.5
+		and is_loop(clip)
+		and t < time
 		and abs(time + delta - lengths[clip] - t) <= 0.05
 	)
 	seams += 1 if wrapped else 0

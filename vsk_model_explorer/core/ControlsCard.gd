@@ -27,6 +27,7 @@ const ROWS := [
 	["keys", ["E"], "E", "Explode"],
 	["keys", ["G"], "G", "Hide grid"],
 	["keys", ["Shift", "G"], "Shift+G", "Metric grid"],
+	["keys", ["O"], "O", "Obstacle course"],
 	["keys", ["Esc"], "Esc", "Close a popup"],
 	["file", "", "Drop a file", ".glb .gltf .vrm .usd"],
 ]

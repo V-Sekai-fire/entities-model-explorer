@@ -104,6 +104,7 @@ var _keys_testing := false
 var _space_jumps := 0
 var _trace := OS.get_environment("MOVE_TRACE") != ""
 var grid: MetricGrid
+var course: ObstacleCourse
 # --orbit-video: the view circles the model at ORBIT_DEG_S while the walk keeps the input frame
 # of the camera it started with, so the walk goes where the test asks and only the view moves.
 const ORBIT_DEG_S := 24.0
@@ -120,6 +121,9 @@ func _ready() -> void:
 	grid = MetricGrid.new()
 	grid.name = "MetricGrid"
 	get_parent().add_child.call_deferred(grid)
+	course = ObstacleCourse.new()
+	course.name = "ObstacleCourse"
+	get_parent().add_child.call_deferred(course)
 	get_parent().gltf_is_loaded.connect(_on_loaded)
 	_helper = Motion.new()
 	_helper.status = func(t): say(t)
@@ -944,6 +948,9 @@ func _begin() -> void:
 	on = true
 	add_to_group("walk_mode")
 	_last_world = _origin
+	if course:
+		var vc := _view_cam()
+		course.place(_origin, -vc.global_transform.basis.z if vc else Vector3(0, 0, -1), _scale)
 	if grid:
 		grid.set_origin(_origin)
 		print(
@@ -1055,6 +1062,13 @@ func _process(delta: float) -> void:
 	# The root motion track holds the floor travel, so the model's origin is the character.
 	var turn: float = float(r[4]) - float(r[7])
 	var char_scene := Vector3(r[2], 0, r[3]).rotated(Vector3.UP, _phi) * _scale + _origin
+	# On the obstacle course the model stands on what is under it: up a step at once, down at a
+	# rate, so it drops off a ledge over a few frames rather than in one.
+	if course and course.visible:
+		var gy := course.ground(Vector3(char_scene.x, _last_world.y, char_scene.z), _origin.y)
+		char_scene.y = (
+			gy if gy >= _last_world.y else lerp(_last_world.y, gy, 1.0 - exp(-dt * 12.0))
+		)
 	_scene.transform = Transform3D(Basis(Vector3.UP, turn), char_scene)
 	if _trace:
 		var hb := _skeleton.find_bone(_hips_path.get_slice(":", 1))
@@ -1157,6 +1171,9 @@ func _run_test() -> void:
 		["crawl", Vector2(0, 1), false, 6.0, 0.0, CRAWL, false],
 		["stand", Vector2.ZERO, false, 3.0, 0.0, STAND, false],
 	]
+	# MOVE_STEPS=course: run straight down the obstacle course (with --obstacle-course).
+	if only == "course":
+		plan = [["course", Vector2(0, 1), true, 26.0, 0.0, STAND, false]]
 	var ok := keys_ok
 	for step in plan:
 		if only != "" and not step[0] in only.split(","):
@@ -1192,6 +1209,9 @@ func _run_test() -> void:
 			seen[_keys[_clip]] = true
 			jumped = jumped or _jumping
 			var hw := _hips_world()
+			if step[0] == "course" and course and Engine.get_process_frames() % 36 == 0:
+				var lc := course.to_local(_last_world)
+				print("COURSE-AT t=%.2f along=%.2f m height=%.2f m" % [t, -lc.z, lc.y])
 			var step_m := Vector2(hw.x - hips_prev.x, hw.z - hips_prev.z).length()
 			# In units of the longest honest frame step: running for the 1/20 s frame cap.
 			leap = max(leap, step_m / (_run_speed * _scale / 20.0))

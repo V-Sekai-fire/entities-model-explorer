@@ -271,5 +271,123 @@ outline("FinishPad", "XY", "0 mm", ["f1", "f2", "f3", "f4"],
 extrude("FinishPad", "pad", "FinishPad")
 colour(["FinishRing", "FinishPad"], "#ffd933")
 
-json.dump({"commands": C}, sys.stdout, indent=1)
+
+
+# --- colliders --------------------------------------------------------------------------------
+# The same course as convex pieces for the MuJoCo guest (mujoco.elf's mjc_load_primitives), from
+# the same parameters: each piece is exact (a step, a slope, a post), except the ring, which is
+# RING_SEGMENTS boxes inside it, within 3 mm of its circles. A record is 12 numbers, in the viewer's
+# course frame (y up, metres, the course along -z, across along -x): type (0 box, 1 cylinder
+# standing along its local y, 2 walkable box), centre xyz, half sizes xyz, quaternion wxyz, 0.
+RING_SEGMENTS = 48
+
+
+def evaluate(params):
+    import math
+    env = {"tan": math.tan, "atan": math.atan, "sqrt": math.sqrt, "sin": math.sin, "cos": math.cos}
+    for name, expr, _ in params:
+        e = expr.replace(" mm", "").replace(" deg", " * 0.017453292519943295")
+        env[name] = float(eval(e, {"__builtins__": {}}, env))
+    return env
+
+
+def colliders():
+    import math
+    v = evaluate(P)
+    out = []
+
+    def rec(kind, x, y, z, hx, hy, hz, q=(1.0, 0.0, 0.0, 0.0), name=""):
+        # x along, y across, z up, mm (SolidCraft) -> viewer metres; half sizes in the
+        # piece's own axes, which the quaternion turns in the viewer frame.
+        out.append({"name": name, "prim": [kind, -y / 1000, z / 1000, -x / 1000,
+                                             hx / 1000, hy / 1000, hz / 1000, *q, 0]})
+
+    def box(name, x0, x1, y0, y1, z0, z1, walk=True):
+        rec(2 if walk else 0, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2,
+            abs(y1 - y0) / 2, abs(z1 - z0) / 2, abs(x1 - x0) / 2, name=name)
+
+    def about_x(a):  # viewer x is across
+        return (math.cos(a / 2), math.sin(a / 2), 0.0, 0.0)
+
+    def about_z(a):  # viewer z is along
+        return (math.cos(a / 2), 0.0, 0.0, math.sin(a / 2))
+
+    hw, m = v["course_w"] / 2, v["floor_margin"]
+    box("Floor", -m, v["finish_x"] + v["start_len"] / 2 + m, -hw - m, hw + m,
+        -(v["floor_t"] + v["floor_gap"]), -v["floor_gap"])
+    box("StartPad", 0, v["start_len"], -hw, hw, 0, v["pad"])
+    fx = v["finish_x"] - v["start_len"] / 2
+    box("FinishPad", fx, fx + v["start_len"], -hw, hw, 0, v["pad"])
+    for lane, rise in (("a", "rise_a"), ("b", "rise_b"), ("c", "rise_c")):
+        y = v["lane_w"] + v["lane_gap"]
+        yc = {"a": -y, "b": 0.0, "c": y}[lane]
+        y0, y1, t, r = yc - v["lane_w"] / 2, yc + v["lane_w"] / 2, v["tread"], v[rise]
+        x = v["stairs_x"]
+        for i in range(4):
+            box(f"Stairs_{lane}", x + i * t, x + (i + 1) * t, y0, y1, 0, (i + 1) * r)
+        xl = x + 4 * t
+        box(f"Stairs_{lane}", xl, xl + v["landing"], y0, y1, 0, 5 * r)
+        xd = xl + v["landing"]
+        for i in range(4):
+            box(f"Stairs_{lane}", xd + i * t, xd + (i + 1) * t, y0, y1, 0, (4 - i) * r)
+    for lane, slope in (("a", "slope_a"), ("b", "slope_b"), ("c", "slope_c")):
+        y = v["lane_w"] + v["lane_gap"]
+        yc = {"a": -y, "b": 0.0, "c": y}[lane]
+        sl, rise, x0 = v[slope], v["ramp_rise"], v["ramps_x"]
+        run = rise / math.tan(sl)
+        # A slope is a turned box whose top face is the slope and whose bottom reaches the floor.
+        half_len, half_t = rise / math.sin(sl) / 2, rise / math.cos(sl) / 2
+        for sign, xa in ((1, x0), (-1, x0 + run + v["deck"])):
+            mx, mz = xa + run / 2, rise / 2
+            nx, nz = -sign * math.sin(sl), math.cos(sl)
+            rec(2, mx - nx * half_t, yc, mz - nz * half_t, v["lane_w"] / 2, half_t, half_len,
+                about_x(sign * sl), name=f"Ramp_{lane}")
+        box(f"Ramp_{lane}", x0 + run, x0 + run + v["deck"], yc - v["lane_w"] / 2,
+            yc + v["lane_w"] / 2, 0, rise)
+    gaps = ["stone_gap_1", "stone_gap_1", "stone_gap_2", "stone_gap_2", "stone_gap_3", "stone_gap_3"]
+    cx = v["stones_x"] + v["stone_d"] / 2
+    for i in range(7):
+        if i:
+            cx += v["stone_d"] + v[gaps[i - 1]]
+        cy = v["stone_d"] * 0.3 * (1 if i % 2 else -1)
+        rec(1, cx, cy, v["stone_h"] / 2, v["stone_d"] / 2, v["stone_h"] / 2, 0, name="Stones")
+    # A bump is an arc extruded across the course: a lying cylinder, mostly under the floor.
+    w, h = v["bump_w"], v["bump_h"]
+    rad = (w * w / 4 + h * h) / (2 * h)
+    for i in range(4):
+        cx = v["bumps_x"] + i * (w + v["bump_gap"]) + w / 2
+        rec(1, cx, 0, h - rad, rad, hw, 0, about_z(-math.pi / 2), name="Bumps")
+    dx, post = v["duck_x"], v["post"]
+    top = v["beam_clear"] + v["beam_t"]
+    for sgn in (-1, 1):
+        box("Beam", dx, dx + v["beam_d"], sgn * hw, sgn * (hw + post), 0, top, walk=False)
+    box("Beam", dx, dx + v["beam_d"], -hw - post, hw + post, v["beam_clear"], top, walk=False)
+    tx = dx + v["beam_d"] + v["between"]
+    ti, tc = v["tunnel_inner"] / 2, v["tunnel_clear"]
+    for sgn in (-1, 1):
+        box("Tunnel", tx, tx + v["tunnel_len"], sgn * ti, sgn * (ti + post), 0, tc + v["roof"],
+            walk=False)
+    box("Tunnel", tx, tx + v["tunnel_len"], -ti - post, ti + post, tc, tc + v["roof"])
+    gx = v["gap_x"]
+    box("PlatformNear", gx, gx + v["plat_len"], -hw, hw, 0, v["plat_h"])
+    gx2 = gx + v["plat_len"] + v["jump_gap"]
+    box("PlatformFar", gx2, gx2 + v["plat_len"], -hw, hw, 0, v["plat_h"])
+    ro, ri = v["ring_d"] / 2, v["ring_d"] / 2 - v["ring_t"]
+    # Each box's outer corners sit on the outer circle and its inner face on the inner one, so
+    # every box is inside the ring (at most ro (1 - cos(pi / n)) short of it, 2.6 mm here).
+    half = math.pi / RING_SEGMENTS
+    outer = ro * math.cos(half)
+    rm, zc, x = (ri + outer) / 2, v["ring_d"] / 2 + v["pad"], v["finish_x"] + v["ring_depth"] / 2
+    for k in range(RING_SEGMENTS):
+        th = 2 * math.pi * (k + 0.5) / RING_SEGMENTS
+        # Local x radial: in the viewer, across is -y, so the radial (cos, sin) is (-cos, sin).
+        rec(0, x, rm * math.cos(th), zc + rm * math.sin(th), (outer - ri) / 2,
+            ro * math.sin(half), v["ring_depth"] / 2, about_z(math.pi - th), name="FinishRing")
+    return out
+
+
+if "--colliders" in sys.argv:
+    json.dump({"colliders": colliders()}, sys.stdout, indent=0)
+else:
+    json.dump({"commands": C}, sys.stdout, indent=1)
 sys.stdout.write("\n")

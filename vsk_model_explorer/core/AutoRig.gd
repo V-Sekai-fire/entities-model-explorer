@@ -11,7 +11,8 @@ extends Node
 # Every saved .vrm without one-eye blinks gets headfit.elf's anime eye closes (FaceBlink.gd).
 # Every saved .vrm also gets <name>.unitypackage beside it: text YAML source assets (prefab, Mesh,
 # humanoid Avatar, materials, textures, CREDITS.txt) written by UnitypackageExport.sgd, compiled
-# GDScript run in the godot-sandbox guest, so the target project needs only the avatar SDK.
+# GDScript run in the godot-sandbox guest. Materials use lilToon, so the target project needs the
+# avatar SDK and lilToon (2.x), nothing else.
 # An opened .usd, .usda, .usdc or .usdz file is rigged from the GLB the viewer made of it
 # (UsdImport.gd), and the result (<name>.vrm or <name>.rigged.glb) goes beside the USD file.
 # In the browser (web build) the rig runs on the page, not here: the page opens the rigged GLB in

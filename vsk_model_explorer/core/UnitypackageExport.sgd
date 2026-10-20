@@ -9,7 +9,7 @@
 #                        avatar descriptor (text YAML)
 #   <Name>.mesh.asset    one Mesh: every skinned primitive merged, one submesh per material
 #   <Name>.avatar.asset  the humanoid Avatar, computed by the rules below
-#   Materials/*.mat      Standard-shader materials from the glTF PBR factors
+#   Materials/*.mat      lilToon materials from the glTF base colour and the MToon shading
 # The reverse of Unidot's readers: UnidotMesh (m_VertexData, m_IndexBuffer), UnidotAvatar
 # (m_HumanDescription), UnidotModelImporter (humanDescription), human_trait.gd (masses, names).
 # Compiled by godot-sandbox's GDScript compiler into a RISC-V guest; it reads and writes no files.
@@ -22,7 +22,6 @@ const CHUNK_JSON := 0x4E4F534A
 const CHUNK_BIN := 0x004E4942
 const HEADER := "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"
 const DESCRIPTOR_SCRIPT := "{fileID: 542108242, guid: 67cc4cb7839cd3741b63733d5adf0442, type: 3}"
-const STANDARD_SHADER := "{fileID: 46, guid: 0000000000000000f000000000000000, type: 0}"
 
 # Humanoid body bones, in the order of m_HumanBoneIndex and m_HumanBoneMass.
 const HUMAN_BONES := ["Hips", "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg", "LeftFoot",
@@ -535,14 +534,39 @@ func to_srgb(c: float) -> float:
 	return 1.055 * pow(c, 1.0 / 2.4) - 0.055
 
 
+# lilToon 2.3.4 shaders, by the glTF alphaMode: OPAQUE, MASK, BLEND. Each variant's own defaults
+# already carry that mode's blend, alpha-to-mask, render type and queue, so the material only
+# names the shader and sets _TransparentMode for lilToon's inspector.
+const LILTOON := {"OPAQUE": ["{fileID: 4800000, guid: df12117ecd77c31469c224178886498e, type: 3}", 0],
+	"MASK": ["{fileID: 4800000, guid: 85d6126cae43b6847aff4b13f4adb8ec, type: 3}", 1],
+	"BLEND": ["{fileID: 4800000, guid: 165365ab7100a044ca85fc8c33548a62, type: 3}", 2]}
+const LILTOON_VERSION := 45
+
+
+func color_yaml(c: Array, alpha: float) -> String:
+	return "{r: %s, g: %s, b: %s, a: %s}" % [f(to_srgb(c[0])), f(to_srgb(c[1])), f(to_srgb(c[2])), f(alpha)]
+
+
+# A lilToon material from the glTF PBR base colour and the VRMC_materials_mtoon shading.
+# MToon 1.0 shades by linearstep(-1 + toony, 1 - toony, N.L + shift); lilToon by a linear ramp over
+# _ShadowBorder -+ _ShadowBlur / 2 in half-Lambert (N.L * 0.5 + 0.5). The two are the same ramp when
+# _ShadowBorder = 0.5 - shift / 2 and _ShadowBlur = 1 - toony.
+# MToon's shadow is shadeColor * shadeMultiplyTexture; lilToon's (no _ShadowColorTex) is
+# albedo * _ShadowColor = baseTexture * baseColor * _ShadowColor. With the shade texture equal to the
+# base texture, or neither present, _ShadowColor = shadeColor / baseColor (linear) gives MToon's.
+# _ShadowBorderColor is black: MToon has no coloured band at the shadow edge.
 # tex_guid: GUID of the base colour texture asset, or "" for none.
 func material_yaml(m: Dictionary, tex_guid: String) -> String:
 	var pbr: Dictionary = m.get("pbrMetallicRoughness", {})
 	var c: Array = pbr.get("baseColorFactor", [1, 1, 1, 1])
-	var col := "{r: %s, g: %s, b: %s, a: %s}" % [f(to_srgb(c[0])), f(to_srgb(c[1])), f(to_srgb(c[2])), f(c[3])]
+	var mode: String = str(m.get("alphaMode", "OPAQUE"))
+	if not LILTOON.has(mode):
+		mode = "OPAQUE"
+	var mtoon: Dictionary = m.get("extensions", {}).get("VRMC_materials_mtoon", {})
 	var s := HEADER + "--- !u!21 &2100000\nMaterial:\n  serializedVersion: 8\n  m_ObjectHideFlags: 0\n"
 	s += "  m_CorrespondingSourceObject: {fileID: 0}\n  m_PrefabInstance: {fileID: 0}\n"
-	s += "  m_PrefabAsset: {fileID: 0}\n  m_Name: %s\n  m_Shader: %s\n" % [str(m.get("name", "Material")), STANDARD_SHADER]
+	s += "  m_PrefabAsset: {fileID: 0}\n  m_Name: %s\n  m_Shader: %s\n" % [str(m.get("name", "Material")),
+		LILTOON[mode][0]]
 	s += "  m_Parent: {fileID: 0}\n  m_ModifiedSerializedProperties: 0\n  m_ValidKeywords: []\n"
 	s += "  m_InvalidKeywords: []\n  m_LightmapFlags: 4\n  m_EnableInstancingVariants: 0\n"
 	s += "  m_DoubleSidedGI: 0\n  m_CustomRenderQueue: -1\n  stringTagMap: {}\n  disabledShaderPasses: []\n"
@@ -552,10 +576,25 @@ func material_yaml(m: Dictionary, tex_guid: String) -> String:
 	else:
 		s += ("    m_TexEnvs:\n    - _MainTex:\n        m_Texture: {fileID: 2800000, guid: %s, type: 3}\n"
 			+ "        m_Scale: {x: 1, y: 1}\n        m_Offset: {x: 0, y: 0}\n") % tex_guid
-	s += "    m_Ints: []\n    m_Floats:\n    - _Glossiness: %s\n    - _Metallic: %s\n" % [
-		f(1.0 - float(pbr.get("roughnessFactor", 1.0))), f(float(pbr.get("metallicFactor", 1.0)))]
-	s += "    - _Mode: 0\n    - _SrcBlend: 1\n    - _DstBlend: 0\n    - _ZWrite: 1\n"
-	s += "    m_Colors:\n    - _Color: %s\n    - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}\n" % col
+	s += "    m_Ints: []\n    m_Floats:\n"
+	s += "    - _lilToonVersion: %d\n    - _TransparentMode: %d\n" % [LILTOON_VERSION, LILTOON[mode][1]]
+	s += "    - _Cull: %d\n" % (0 if bool(m.get("doubleSided", false)) else 2)
+	s += "    - _Cutoff: %s\n" % f(float(m.get("alphaCutoff", 0.5)))
+	var shadow := ""
+	if not mtoon.is_empty():
+		var shift := float(mtoon.get("shadingShiftFactor", 0.0))
+		var toony := float(mtoon.get("shadingToonyFactor", 0.9))
+		s += "    - _UseShadow: 1\n    - _ShadowStrength: 1\n    - _ShadowBorderRange: 0\n"
+		s += "    - _ShadowBorder: %s\n    - _ShadowBlur: %s\n" % [f(clampf(0.5 - shift * 0.5, 0.0, 1.0)),
+			f(clampf(1.0 - toony, 0.0, 1.0))]
+		var shade: Array = mtoon.get("shadeColorFactor", [0, 0, 0])
+		var ratio := []
+		for k in 3:
+			var b := float(c[k])
+			ratio.append(clampf(float(shade[k]) / b, 0.0, 1.0) if b > 0.0 else float(shade[k]))
+		shadow = "    - _ShadowColor: %s\n    - _ShadowBorderColor: {r: 0, g: 0, b: 0, a: 1}\n" % color_yaml(
+			ratio, 1.0)
+	s += "    m_Colors:\n    - _Color: %s\n" % color_yaml(c, float(c[3])) + shadow
 	s += "  m_BuildTextureStacks: []\n"
 	return s
 

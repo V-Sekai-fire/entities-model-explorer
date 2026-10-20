@@ -180,14 +180,14 @@ gaps = ["stone_gap_1", "stone_gap_1", "stone_gap_2", "stone_gap_2", "stone_gap_3
 along = "stones_x + stone_d / 2"
 for i in range(7):
     cx = 30000 + i * 900
-    cmd("sketch.circle.center", center=[cx, 350 if i % 2 else -350], diameter=500)
+    cmd("sketch.circle.center", center=[cx, 150 if i % 2 else -150], diameter=500)
     c = f"c{i}"
     C[-1]["params"]["id"] = c
     if i:
         along += f" + stone_d + {gaps[i - 1]}"
     cmd("sketch.dimension", entities=[c], type="diameter", value="stone_d")
     cmd("sketch.dimension", entities=["origin", f"{c}.center"], type="horizontal", value=along)
-    cmd("sketch.dimension", entities=["origin", f"{c}.center"], type="vertical", value="stone_d * 0.7")
+    cmd("sketch.dimension", entities=["origin", f"{c}.center"], type="vertical", value="stone_d * 0.3")
 cmd("sketch.finish")
 cmd("solid.extrude", sketch="Stones", distance="stone_h", direction="positive", operation="new",
     body_name="Stones", profiles="all")

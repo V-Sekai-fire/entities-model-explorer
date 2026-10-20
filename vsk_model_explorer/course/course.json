@@ -1742,7 +1742,7 @@
    "params": {
     "center": [
      30000,
-     -350
+     -150
     ],
     "diameter": 500,
     "id": "c0"
@@ -1777,7 +1777,7 @@
      "c0.center"
     ],
     "type": "vertical",
-    "value": "stone_d * 0.7"
+    "value": "stone_d * 0.3"
    }
   },
   {
@@ -1785,7 +1785,7 @@
    "params": {
     "center": [
      30900,
-     350
+     150
     ],
     "diameter": 500,
     "id": "c1"
@@ -1820,7 +1820,7 @@
      "c1.center"
     ],
     "type": "vertical",
-    "value": "stone_d * 0.7"
+    "value": "stone_d * 0.3"
    }
   },
   {
@@ -1828,7 +1828,7 @@
    "params": {
     "center": [
      31800,
-     -350
+     -150
     ],
     "diameter": 500,
     "id": "c2"
@@ -1863,7 +1863,7 @@
      "c2.center"
     ],
     "type": "vertical",
-    "value": "stone_d * 0.7"
+    "value": "stone_d * 0.3"
    }
   },
   {
@@ -1871,7 +1871,7 @@
    "params": {
     "center": [
      32700,
-     350
+     150
     ],
     "diameter": 500,
     "id": "c3"
@@ -1906,7 +1906,7 @@
      "c3.center"
     ],
     "type": "vertical",
-    "value": "stone_d * 0.7"
+    "value": "stone_d * 0.3"
    }
   },
   {
@@ -1914,7 +1914,7 @@
    "params": {
     "center": [
      33600,
-     -350
+     -150
     ],
     "diameter": 500,
     "id": "c4"
@@ -1949,7 +1949,7 @@
      "c4.center"
     ],
     "type": "vertical",
-    "value": "stone_d * 0.7"
+    "value": "stone_d * 0.3"
    }
   },
   {
@@ -1957,7 +1957,7 @@
    "params": {
     "center": [
      34500,
-     350
+     150
     ],
     "diameter": 500,
     "id": "c5"
@@ -1992,7 +1992,7 @@
      "c5.center"
     ],
     "type": "vertical",
-    "value": "stone_d * 0.7"
+    "value": "stone_d * 0.3"
    }
   },
   {
@@ -2000,7 +2000,7 @@
    "params": {
     "center": [
      35400,
-     -350
+     -150
     ],
     "diameter": 500,
     "id": "c6"
@@ -2035,7 +2035,7 @@
      "c6.center"
     ],
     "type": "vertical",
-    "value": "stone_d * 0.7"
+    "value": "stone_d * 0.3"
    }
   },
   {

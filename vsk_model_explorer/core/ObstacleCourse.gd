@@ -91,8 +91,9 @@ func _build() -> void:
 		var l := Label3D.new()
 		l.text = SIGNS[str(mi.name)]
 		l.position = Vector3(0, max(box.end.y, 1.0) + 0.8, box.end.z)
-		l.pixel_size = 0.004
-		l.font_size = 48
+		# About 40 cm tall letters: readable from the far side of a station.
+		l.pixel_size = 0.008
+		l.font_size = 64
 		l.outline_size = 16
 		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		add_child(l)

@@ -53,7 +53,12 @@ const CARD_ROWS := [
 	["keys", ["Z"], "Z or pad Y", "Crawl"],
 	["keys", ["Space"], "Space or A", "Jump"],
 ]
-const HELP := "W A S D or click the floor walk, double click runs there, Shift run, C crouch, Z crawl, Space jump, M stop (gamepad: stick, RT, B, Y, A, Start)"
+# Short lines: one long line is wider than a 1280 px window and the card cuts it off.
+const HELP := (
+	"W A S D or click the floor: walk.   Double click: run there.   Shift: run.\n"
+	+ "C: crouch.   Z: crawl.   Space: jump.   M: stop.\n"
+	+ "Gamepad: stick, RT, B, Y, A, Start."
+)
 
 var source := ""
 var busy := false
@@ -1102,7 +1107,7 @@ func _process(delta: float) -> void:
 			* Transform3D(c.basis, Vector3.ZERO)
 			* _orbit_rel
 		)
-	var label := "Walk mode, %s%s: %s" % [MODE_NAMES[_mode], ", jumping" if _jumping else "", HELP]
+	var label := "Walk mode, %s%s\n%s" % [MODE_NAMES[_mode], ", jumping" if _jumping else "", HELP]
 	if status.is_valid():
 		status.call(label)
 

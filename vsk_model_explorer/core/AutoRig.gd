@@ -83,6 +83,8 @@ func _ready() -> void:
 	panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	panel.position = Vector2(16, 16)
 	_label = Label.new()
+	# Long messages wrap inside the window instead of running off its edge.
+	_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	panel.add_child(_label)
 	layer.add_child(panel)
 	panel.visible = false
@@ -124,6 +126,14 @@ func available() -> bool:
 
 func show_status(text: String) -> void:
 	_label.text = text
+	# Fit the widest line, but never past the window's right edge (16 px margins).
+	var room := _label.get_viewport_rect().size.x - 64.0
+	var font := _label.get_theme_font("font")
+	var widest := 0.0
+	for line in text.split("\n"):
+		widest = max(widest, font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, _label.get_theme_font_size("font_size")).x)
+	_label.custom_minimum_size.x = min(widest + 2.0, room)
+	_label.get_parent().reset_size()
 	_label.get_parent().visible = text != ""
 	if _test and text != "" and not text.begins_with("Auto-rig: ") and not text.begins_with(SAVED):
 		printerr("AUTO-RIG-FAIL ", text)

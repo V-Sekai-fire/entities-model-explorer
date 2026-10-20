@@ -401,6 +401,132 @@
    }
   },
   {
+   "command": "parameters.add",
+   "params": {
+    "name": "floor_margin",
+    "expression": "3000 mm",
+    "comment": "Floor beyond the course on every side"
+   }
+  },
+  {
+   "command": "parameters.add",
+   "params": {
+    "name": "floor_t",
+    "expression": "50 mm",
+    "comment": "Floor slab thickness"
+   }
+  },
+  {
+   "command": "parameters.add",
+   "params": {
+    "name": "floor_gap",
+    "expression": "10 mm",
+    "comment": "Floor top below the grid, so the grid lines draw over it"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Floor",
+    "offset": "-(floor_t + floor_gap)"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -3000,
+      -5000
+     ],
+     [
+      60000,
+      -5000
+     ],
+     [
+      60000,
+      5000
+     ],
+     [
+      -3000,
+      5000
+     ]
+    ],
+    "closed": true,
+    "ids": [
+     "l1",
+     "l2",
+     "l3",
+     "l4"
+    ],
+    "infer": true
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l1"
+    ],
+    "value": "finish_x + start_len / 2 + 2 * floor_margin"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l2"
+    ],
+    "value": "course_w + 2 * floor_margin"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "l1.start"
+    ],
+    "type": "vertical",
+    "value": "course_w / 2 + floor_margin"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "l1.start"
+    ],
+    "type": "horizontal",
+    "value": "floor_margin"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Floor",
+    "distance": "floor_t",
+    "direction": "positive",
+    "operation": "new",
+    "body_name": "Floor"
+   }
+  },
+  {
+   "command": "appearance.assign",
+   "params": {
+    "bodies": [
+     "Floor"
+    ],
+    "color": "#8a8f96"
+   }
+  },
+  {
    "command": "sketch.create",
    "params": {
     "plane": "XY",

@@ -123,12 +123,27 @@ P = [
     ("ring_t", "150 mm", "Finish ring band width"),
     ("ring_depth", "180 mm", "Finish ring depth along the course"),
     ("finish_x", "gap_x + 2 * plat_len + jump_gap + between", "Where the finish ring stands"),
+    ("floor_margin", "3000 mm", "Floor beyond the course on every side"),
+    ("floor_t", "50 mm", "Floor slab thickness"),
+    ("floor_gap", "10 mm", "Floor top below the grid, so the grid lines draw over it"),
 ]
 for p in P:
     param(*p)
 
 # Lane centres across the course (Y): A left, B middle, C right.
 LANES = {"a": "-(lane_w + lane_gap)", "b": "0 mm", "c": "lane_w + lane_gap"}
+
+# --- floor: a solid slab under the whole course. The viewer's grid is see-through lines that
+# take no light, so without it nothing casts a shadow on the ground and the course looks
+# like it floats. Its top sits floor_gap under the grid plane. ------------------------------
+outline("Floor", "XY", "-(floor_t + floor_gap)", ["l1", "l2", "l3", "l4"],
+        [[-3000, -5000], [60000, -5000], [60000, 5000], [-3000, 5000]],
+        [length("l1", "finish_x + start_len / 2 + 2 * floor_margin"),
+         length("l2", "course_w + 2 * floor_margin"),
+         v("origin", "l1.start", "course_w / 2 + floor_margin"),
+         h("origin", "l1.start", "floor_margin")])
+extrude("Floor", "floor_t", "Floor")
+colour(["Floor"], "#8a8f96")
 
 # --- start pad --------------------------------------------------------------------------------
 outline("StartPad", "XY", "0 mm", ["s1", "s2", "s3", "s4"],

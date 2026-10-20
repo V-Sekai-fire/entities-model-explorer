@@ -1,7 +1,7 @@
 class_name MetricGrid
 extends Node3D
-# Metric grid: puts the floor grid on the floor the model walks on, with its zero at the walk's
-# start point, so locomotion can be read off it in an orbit view. 1 m lines, 10 cm lines,
+# Metric grid: puts the floor's grid balls (GizmoPlane, GridBalls.gd) on the floor the model
+# walks on, one ball per metre with a ball at the walk's start point, so locomotion can be read off it in an orbit view. 1 m lines, 10 cm lines,
 # labels every metre along both axes, an X/Y/Z gizmo at the zero, and two floor markers that
 # follow the model: yellow = the root (the point root motion moves), cyan = under the hips.
 # --metric-grid turns it on at start; Shift+G turns it on and off.
@@ -9,7 +9,7 @@ extends Node3D
 const SPAN := 20
 const LABEL_EVERY := 1
 
-var _plane: MeshInstance3D
+var _plane: Node3D
 var _plane_y0 := 0.0
 var _origin := Vector3.ZERO
 var _root_mark: MeshInstance3D
@@ -17,7 +17,7 @@ var _hips_mark: MeshInstance3D
 
 
 func _ready() -> void:
-	_plane = get_parent().get_node_or_null("GizmoPlane") as MeshInstance3D
+	_plane = get_parent().get_node_or_null("GizmoPlane") as Node3D
 	if _plane:
 		_plane_y0 = _plane.global_position.y
 	_build()
@@ -33,12 +33,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func set_on(on: bool) -> void:
 	visible = on
-	var m := _material()
-	if m:
-		m.set_shader_parameter("metric", on)
-		m.set_shader_parameter("grid_origin", _origin if on else Vector3.ZERO)
 	if _plane:
-		_plane.global_position.y = _origin.y if on else _plane_y0
+		_plane.global_position = _origin if on else Vector3(0, _plane_y0, 0)
 
 
 # The zero of the grid: the walk's start point on the floor it walks on.
@@ -50,16 +46,12 @@ func set_origin(o: Vector3) -> void:
 
 # Each frame of the walk: the root's floor point and the hips, in the scene.
 func track(root: Vector3, hips: Vector3) -> void:
+	if _plane and _plane.has_method("set_focus"):
+		_plane.call("set_focus", root)
 	if not visible:
 		return
 	_root_mark.global_position = Vector3(root.x, _origin.y, root.z)
 	_hips_mark.global_position = Vector3(hips.x, _origin.y, hips.z)
-
-
-func _material() -> ShaderMaterial:
-	if _plane == null or _plane.mesh == null:
-		return null
-	return _plane.mesh.surface_get_material(0) as ShaderMaterial
 
 
 func _build() -> void:

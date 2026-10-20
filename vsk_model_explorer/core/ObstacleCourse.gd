@@ -1,13 +1,25 @@
 class_name ObstacleCourse
 extends Node3D
 # The walk-mode obstacle course: a game-like run of stations (stairs, ramps, stepping stones,
-# bumps, a beam and a tunnel to duck under, a jump gap, a finish ring), baked by the SolidCraft
-# CAD kernel with tools/course/bake_course.gd. Laid out in metres for a 1.75 m person along -Z;
+# bumps, a beam and a tunnel to duck under, a jump gap, a finish ring). Its shapes are a
+# parametric SolidCraft script (tools/course/course_script.py: constrained, dimensioned sketches
+# extruded), built by the SolidCraft CAD kernel with tools/course/bake_course.gd. Laid out in
+# metres for a 1.75 m person along -Z;
 # placed at the walk's start, turned to face away from the camera and scaled to the model.
 # O or --obstacle-course turns it on; the walk then follows the ground under the model.
 
 const SCENE := "res://vsk_model_explorer/course/obstacle_course.glb"
-const STATIONS := "res://vsk_model_explorer/course/obstacle_course.json"
+# A sign above each station, keyed by the start of its SolidCraft body names.
+const SIGNS := {
+	"StartPad": "Start: walk ahead",
+	"Stairs_a": "Stairs: 10, 17 and 25 cm steps",
+	"Ramp_a": "Ramps: 10, 20 and 30 degrees",
+	"Stones": "Stepping stones",
+	"Bumps": "Bumps",
+	"Beam": "Duck under: crouch, then crawl",
+	"PlatformNear": "Jump the gap",
+	"FinishRing": "Finish",
+}
 # The highest ledge the walk steps onto (a 1.75 m person's 45 cm): anything higher stays a wall
 # for the ground probe, so the model walks under a beam rather than onto it.
 const STEP_UP := 0.45
@@ -71,17 +83,16 @@ func _build() -> void:
 	add_child(_course)
 	for m in _course.find_children("*", "MeshInstance3D", true, false):
 		(m as MeshInstance3D).create_trimesh_collision()
-	var f := FileAccess.open(STATIONS, FileAccess.READ)
-	var data = JSON.parse_string(f.get_as_text()) if f else null
-	if data is Dictionary:
-		for s in data.get("stations", []):
-			var l := Label3D.new()
-			l.text = str(s.text)
-			l.position = Vector3(-2.4, 2.2, float(s.z) - 0.5)
-			l.pixel_size = 0.004
-			l.font_size = 48
-			l.outline_size = 16
-			l.width = 900.0
-			l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			add_child(l)
+	for m in _course.get_children():
+		var mi := m as MeshInstance3D
+		if mi == null or not SIGNS.has(str(mi.name)):
+			continue
+		var box := mi.get_aabb()
+		var l := Label3D.new()
+		l.text = SIGNS[str(mi.name)]
+		l.position = Vector3(0, max(box.end.y, 1.0) + 0.8, box.end.z)
+		l.pixel_size = 0.004
+		l.font_size = 48
+		l.outline_size = 16
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		add_child(l)

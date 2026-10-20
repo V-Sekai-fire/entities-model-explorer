@@ -51,6 +51,8 @@ func _prepare_material_for_export(
 		has_outline = outline_shader.find("mtoon_outline") > 0
 
 	var standard_mat: StandardMaterial3D = StandardMaterial3D.new()
+	# glTF writes the material's name from this stand-in, so it carries the MToon material's.
+	standard_mat.resource_name = mtoon_material.resource_name
 	var col: Variant = mtoon_material.get_shader_parameter("_Color")
 	if typeof(col) == TYPE_VECTOR4:
 		col = Color(col.x, col.y, col.z, col.w)

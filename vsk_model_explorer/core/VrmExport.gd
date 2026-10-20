@@ -4,6 +4,8 @@ extends RefCounted
 # turns the model to face +Z (left on +X), swaps every material to MToon and writes the file with
 # the VRM add-on's glTF extensions. The T-pose is not done here: skintokens.elf's VRM step does it
 # afterwards, as for any .vrm. Materials are always MToon: many VRM players refuse PBR.
+# Fingers: roles that name them (<side>_<finger>_<1..3>, base to tip) are used as given; else
+# _find_fingers() reads them off the skeleton (see there), or the hand gets none.
 # MToon defaults come from a ColorChecker calibration against the PBR look (24 patches, mean
 # dE2000 1.5 under neutral light, 2.3 under the viewer's sky in physical light units): shade =
 # 0.2 x base, toony 0.2, shift 0, giEqualization 0.1. The MToon 1.0 defaults score 7.0 there.
@@ -47,7 +49,38 @@ const ROLE_TO_HUMAN := {
 	"right_shin": "RightLowerLeg",
 	"right_foot": "RightFoot",
 	"right_toe": "RightToes",
+	"left_thumb_1": "LeftThumbMetacarpal",
+	"left_thumb_2": "LeftThumbProximal",
+	"left_thumb_3": "LeftThumbDistal",
+	"left_index_1": "LeftIndexProximal",
+	"left_index_2": "LeftIndexIntermediate",
+	"left_index_3": "LeftIndexDistal",
+	"left_middle_1": "LeftMiddleProximal",
+	"left_middle_2": "LeftMiddleIntermediate",
+	"left_middle_3": "LeftMiddleDistal",
+	"left_ring_1": "LeftRingProximal",
+	"left_ring_2": "LeftRingIntermediate",
+	"left_ring_3": "LeftRingDistal",
+	"left_little_1": "LeftLittleProximal",
+	"left_little_2": "LeftLittleIntermediate",
+	"left_little_3": "LeftLittleDistal",
+	"right_thumb_1": "RightThumbMetacarpal",
+	"right_thumb_2": "RightThumbProximal",
+	"right_thumb_3": "RightThumbDistal",
+	"right_index_1": "RightIndexProximal",
+	"right_index_2": "RightIndexIntermediate",
+	"right_index_3": "RightIndexDistal",
+	"right_middle_1": "RightMiddleProximal",
+	"right_middle_2": "RightMiddleIntermediate",
+	"right_middle_3": "RightMiddleDistal",
+	"right_ring_1": "RightRingProximal",
+	"right_ring_2": "RightRingIntermediate",
+	"right_ring_3": "RightRingDistal",
+	"right_little_1": "RightLittleProximal",
+	"right_little_2": "RightLittleIntermediate",
+	"right_little_3": "RightLittleDistal",
 }
+const FINGERS := ["thumb", "index", "middle", "ring", "little"]
 const REQUIRED := [
 	"hips",
 	"spine1",
@@ -132,6 +165,9 @@ func _build(scene: Node, roles: Dictionary, title: String) -> String:
 			"lost mesh surfaces while turning or posing (%d of %d left)"
 			% [_surface_count(scene), surfaces]
 		)
+	for side in ["left", "right"]:
+		if not roles.has(side + "_thumb_1"):
+			report[side + "_fingers"] = _find_fingers(scene, skel, roles, side)
 	_rename_bones(scene, skel, roles)
 	skel.name = "GeneralSkeleton"
 	report.mtoon_materials = _to_mtoon(scene)
@@ -300,6 +336,47 @@ static func _swap_sides(roles: Dictionary) -> Dictionary:
 			s = "left_" + s.substr(6)
 		out[s] = roles[r]
 	return out
+
+
+# A hand's fingers from the skeleton, for rigs whose roles name none. The hand must have exactly
+# five child chains of at least three joints (more joints: the first three count). The thumb is
+# the chain whose base is nearest the wrist (its metacarpal starts at the wrist; this holds in a
+# T-pose and with the arms down); in the model's frame after the turn (facing +Z) the other four go
+# front to back as index, middle, ring, little. Adds the roles and returns "", or returns why the hand gets no finger bones.
+static func _find_fingers(scene: Node, skel: Skeleton3D, roles: Dictionary, side: String) -> String:
+	var hand := skel.find_bone(roles[side + "_hand"])
+	var to_scene := _to_root(skel, scene)
+	var pos := func(b: int) -> Vector3: return to_scene * skel.get_bone_global_rest(b).origin
+	var chains := []
+	for c in skel.get_bone_children(hand):
+		var chain: Array[int] = [c]
+		while chain.size() < 3 and skel.get_bone_children(chain[-1]).size() > 0:
+			var next: PackedInt32Array = skel.get_bone_children(chain[-1])
+			if next.size() != 1:
+				break
+			chain.append(next[0])
+		if chain.size() == 3:
+			chains.append(chain)
+	if chains.size() != 5:
+		return "%d three-joint chains under the hand, not 5" % chains.size()
+	var wrist: Vector3 = pos.call(hand)
+	var thumb := 0
+	var nearest := INF
+	for i in chains.size():
+		var d: float = (pos.call(chains[i][0]) - wrist).length()
+		if d < nearest:
+			nearest = d
+			thumb = i
+	var rest := []
+	for i in chains.size():
+		if i != thumb:
+			rest.append(chains[i])
+	rest.sort_custom(func(a, b): return pos.call(a[0]).z > pos.call(b[0]).z)
+	var ordered := [chains[thumb]] + rest
+	for f in FINGERS.size():
+		for k in 3:
+			roles["%s_%s_%d" % [side, FINGERS[f], k + 1]] = skel.get_bone_name(ordered[f][k])
+	return ""
 
 
 static func _rename_bones(scene: Node, skel: Skeleton3D, roles: Dictionary) -> void:

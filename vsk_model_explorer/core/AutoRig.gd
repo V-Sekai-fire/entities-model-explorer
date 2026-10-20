@@ -11,8 +11,9 @@ extends Node
 # Every saved .vrm without one-eye blinks gets headfit.elf's anime eye closes (FaceBlink.gd).
 # Every saved .vrm also gets <name>.unitypackage beside it: text YAML source assets (prefab, Mesh,
 # humanoid Avatar, materials, textures, CREDITS.txt) written by UnitypackageExport.sgd, compiled
-# GDScript run in the godot-sandbox guest. Materials use lilToon, so the target project needs the
-# avatar SDK and lilToon (2.x), nothing else.
+# GDScript run in the godot-sandbox guest. Materials use lilToon, and the package carries lilToon
+# itself (MIT, vendored at thirdparty/lilToon, packed by tools/liltoon_pack.gd into LILTOON_TAR),
+# so the target project needs only the avatar SDK.
 # An opened .usd, .usda, .usdc or .usdz file is rigged from the GLB the viewer made of it
 # (UsdImport.gd), and the result (<name>.vrm or <name>.rigged.glb) goes beside the USD file.
 # In the browser (web build) the rig runs on the page, not here: the page opens the rigged GLB in
@@ -32,6 +33,8 @@ const VrmExport := preload("res://vsk_model_explorer/core/VrmExport.gd")
 const FaceBlink := preload("res://vsk_model_explorer/core/FaceBlink.gd")
 # Loaded when used: the .sgd compiles only where the godot-sandbox library is present.
 const UNITYPACKAGE := "res://vsk_model_explorer/core/UnitypackageExport.sgd"
+# tools/liltoon_pack.gd writes it (package_desktop.sh pck runs it before the export).
+const LILTOON_TAR := "res://vsk_model_explorer/liltoon.tar"
 const WAIT_GPU := 1
 const READ := 2
 const UPLOAD := 3
@@ -419,8 +422,11 @@ func add_unitypackage(vrm_path: String) -> String:
 		return ""
 	var vrm := FileAccess.get_file_as_bytes(vrm_path)
 	var name := package_name(vrm_path)
+	var vendored := FileAccess.get_file_as_bytes(LILTOON_TAR)
+	if vendored.is_empty():
+		print("AUTO-RIG-UNITYPACKAGE without lilToon: no ", LILTOON_TAR, " (tools/liltoon_pack.gd)")
 	var pkg: PackedByteArray = ex.native_package(
-		vrm, name, ex.view_position(vrm), credits(vrm, name)
+		vrm, name, ex.view_position(vrm), credits(vrm, name), vendored
 	)
 	if pkg.is_empty():
 		print("AUTO-RIG-UNITYPACKAGE skipped: ", ex.get("last_error"))

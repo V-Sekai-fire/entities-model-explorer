@@ -10,6 +10,7 @@
 #   <Name>.mesh.asset    one Mesh: every skinned primitive merged, one submesh per material
 #   <Name>.avatar.asset  the humanoid Avatar, computed by the rules below
 #   Materials/*.mat      lilToon materials from the glTF base colour and the MToon shading
+#   Assets/lilToon/      lilToon itself (MIT), when the caller passes the vendored members
 # The reverse of Unidot's readers: UnidotMesh (m_VertexData, m_IndexBuffer), UnidotAvatar
 # (m_HumanDescription), UnidotModelImporter (humanDescription), human_trait.gd (masses, names).
 # Compiled by godot-sandbox's GDScript compiler into a RISC-V guest; it reads and writes no files.
@@ -952,16 +953,25 @@ func folder_meta(guid: String) -> String:
 
 
 func add(tar: PackedByteArray, path: String, data: PackedByteArray, meta: String, folder: bool) -> void:
-	var g := guid_for(path)
-	tar.append_array(tar_member(g + "/", PackedByteArray(), true))
+	tar.append_array(members(guid_for(path), path, data, meta, folder))
+
+
+# The tar members of one package asset: <guid>/, <guid>/asset (not for a folder), <guid>/asset.meta
+# and <guid>/pathname. tools/liltoon_pack.gd calls this too, with lilToon's own GUIDs.
+func members(g: String, path: String, data: PackedByteArray, meta: String, folder: bool) -> PackedByteArray:
+	var out := tar_member(g + "/", PackedByteArray(), true)
 	if not folder:
-		tar.append_array(tar_member(g + "/asset", data, false))
-	tar.append_array(tar_member(g + "/asset.meta", meta.to_utf8_buffer(), false))
-	tar.append_array(tar_member(g + "/pathname", path.to_utf8_buffer(), false))
+		out.append_array(tar_member(g + "/asset", data, false))
+	out.append_array(tar_member(g + "/asset.meta", meta.to_utf8_buffer(), false))
+	out.append_array(tar_member(g + "/pathname", path.to_utf8_buffer(), false))
+	return out
 
 
-# vrm: a T-posed VRM 1.0. Returns the .unitypackage bytes, or nothing with `last_error` set.
-func native_package(vrm: PackedByteArray, name: String, view: Vector3, credits: String) -> PackedByteArray:
+# vrm: a T-posed VRM 1.0. vendored: tar members appended as they are (liltoon.tar from
+# tools/liltoon_pack.gd: lilToon at Assets/lilToon with its own GUIDs), or empty. Returns the
+# .unitypackage bytes, or nothing with `last_error` set.
+func native_package(vrm: PackedByteArray, name: String, view: Vector3, credits: String,
+		vendored: PackedByteArray) -> PackedByteArray:
 	last_error = ""
 	var gltf := glb_json(vrm)
 	var bin := glb_bin(vrm)
@@ -1053,6 +1063,7 @@ func native_package(vrm: PackedByteArray, name: String, view: Vector3, credits: 
 		importer_meta(guid_for(paths["prefab"]), "PrefabImporter", 0), false)
 	add(tar, dir + "/CREDITS.txt", credits.to_utf8_buffer(),
 		importer_meta(guid_for(dir + "/CREDITS.txt"), "TextScriptImporter", 0), false)
+	tar.append_array(vendored)
 	var end := PackedByteArray()
 	end.resize(1024)
 	tar.append_array(end)

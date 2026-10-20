@@ -1,8 +1,8 @@
 extends SceneTree
 # Packs the vendored lilToon (thirdparty/lilToon, a git subtree of lilxyzw/lilToon) into
-# res://vsk_model_explorer/liltoon.tar: the .unitypackage tar members of Assets/lilToon, each asset
+# res://vsk_model_explorer/liltoon.tar: the asset package tar members of Assets/lilToon, each asset
 # under lilToon's own GUID from its .meta file, so materials that name lilToon's shaders by GUID
-# find them. AutoRig.gd passes the file to UnitypackageExport.sgd, which appends it to every
+# find them. AutoRig.gd passes the file to AssetPackageExport.sgd, which appends it to every
 # package. Not shipped; tools/package_desktop.sh runs it before the export, and a source checkout
 # runs it once:
 #   godot --headless --path . --script tools/liltoon_pack.gd [-- control]
@@ -10,8 +10,8 @@ extends SceneTree
 # `control` leaves the lilToon shader out, and must fail.
 const SRC := "res://thirdparty/lilToon/Assets"
 const OUT := "res://vsk_model_explorer/liltoon.tar"
-const UNITYPACKAGE := "res://vsk_model_explorer/unitypackage/UnitypackageExport.sgd"
-# lts, lts_cutout, lts_trans: the shaders UnitypackageExport.sgd writes into materials.
+const ASSET_PACKAGE := "res://vsk_model_explorer/asset_package/AssetPackageExport.sgd"
+# lts, lts_cutout, lts_trans: the shaders AssetPackageExport.sgd writes into materials.
 const SHADERS := [
 	"df12117ecd77c31469c224178886498e",
 	"85d6126cae43b6847aff4b13f4adb8ec",
@@ -21,9 +21,9 @@ const SHADERS := [
 
 func _initialize() -> void:
 	var control := OS.get_cmdline_user_args().has("control")
-	var ex = load(UNITYPACKAGE).new()
+	var ex = load(ASSET_PACKAGE).new()
 	if ex == null or not ex.has_method("members"):
-		_end("FAIL UnitypackageExport.sgd did not compile", 1)
+		_end("FAIL AssetPackageExport.sgd did not compile", 1)
 		return
 	var paths: Array[String] = []
 	_walk("lilToon", paths)

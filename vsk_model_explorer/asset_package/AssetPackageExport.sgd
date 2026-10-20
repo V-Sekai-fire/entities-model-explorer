@@ -1,12 +1,12 @@
 # This file is part of Unidot Importer. See LICENSE.txt for full MIT license.
 # Copyright (c) 2021-present Lyuma <xn.lyuma@gmail.com> and contributors
 # SPDX-License-Identifier: MIT
-# SkinTokens' .unitypackage export (AutoRig.gd runs it for every saved .vrm). This file is the one
+# SkinTokens' asset package export (AutoRig.gd runs it for every saved .vrm). This file is the one
 # copy: it came from the chibifire-stages/unidot_importer fork, whose export_avatar.gd consumes it as
-# a git subtree of this folder alone (branch split/unitypackage-export, `git subtree split --prefix=
-# vsk_model_explorer/unitypackage`), so keep this folder to this file.
+# a git subtree of this folder alone (branch split/asset-package-export, `git subtree split --prefix=
+# vsk_model_explorer/asset_package`), so keep this folder to this file.
 # A VRM 1.0 (T-posed, glTF space) becomes text YAML source assets in a
-# .unitypackage, so the target project needs nothing but the avatar descriptor's SDK:
+# asset package, so the target project needs nothing but the avatar descriptor's SDK:
 #   <Name>.prefab        GameObjects, Transforms, a SkinnedMeshRenderer, an Animator and a
 #                        avatar descriptor (text YAML)
 #   <Name>.mesh.asset    one Mesh: every skinned primitive merged, one submesh per material
@@ -23,6 +23,7 @@ extends RefCounted
 const GLB_MAGIC := 0x46546C67
 const CHUNK_JSON := 0x4E4F534A
 const CHUNK_BIN := 0x004E4942
+# The format's own YAML tag: importers need it as written.
 const HEADER := "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"
 const DESCRIPTOR_SCRIPT := "{fileID: 542108242, guid: 67cc4cb7839cd3741b63733d5adf0442, type: 3}"
 
@@ -1002,7 +1003,7 @@ func members(g: String, path: String, data: PackedByteArray, meta: String, folde
 
 # vrm: a T-posed VRM 1.0. vendored: tar members appended as they are (liltoon.tar from
 # tools/liltoon_pack.gd: lilToon at Assets/lilToon with its own GUIDs), or empty. Returns the
-# .unitypackage bytes, or nothing with `last_error` set.
+# Asset package bytes, or nothing with `last_error` set.
 func native_package(vrm: PackedByteArray, name: String, view: Vector3, credits: String,
 		vendored: PackedByteArray) -> PackedByteArray:
 	last_error = ""

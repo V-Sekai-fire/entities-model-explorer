@@ -1464,6 +1464,15 @@ func _start_orbit() -> void:
 	# Step back so the whole model and a few metres of grid are in view, and look down a bit more.
 	_orbit_rel.origin *= 2.5
 	_orbit_rel = Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-10.0)), Vector3.ZERO) * _orbit_rel
+	# The movie is the project's viewport size; a window whose title bar takes part of that gets
+	# scaled up and cropped at the sides (the help card lost its left edge). A borderless window
+	# of exactly the movie size records 1:1.
+	var w := get_window()
+	w.borderless = true
+	w.size = Vector2i(
+		ProjectSettings.get_setting("display/window/size/viewport_width"),
+		ProjectSettings.get_setting("display/window/size/viewport_height")
+	)
 	# The video shows the scene only: hide the panels and cards.
 	for n in get_parent().find_children("*", "Control", true, false):
 		if not n.get_parent() is Control:

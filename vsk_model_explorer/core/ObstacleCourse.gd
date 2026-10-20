@@ -23,6 +23,10 @@ const SIGNS := {
 # The highest ledge the walk steps onto (a 1.75 m person's 45 cm): anything higher stays a wall
 # for the ground probe, so the model walks under a beam rather than onto it.
 const STEP_UP := 0.45
+# The body that walls stop, for a 1.75 m person: its half width, and its height standing,
+# crouching and crawling (MotionMatch's STAND, CROUCH, CRAWL).
+const BODY_RADIUS := 0.25
+const BODY_HEIGHT := [1.75, 1.2, 0.6]
 
 var _course: Node3D
 var _scale := 1.0
@@ -59,6 +63,46 @@ func place(origin: Vector3, forward: Vector3, scale_: float) -> void:
 	var yaw := atan2(-f.x, -f.z)
 	global_transform = Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * scale_), origin)
 	set_on(visible)
+
+
+# Move the body from `from` toward `to` on the floor plane, stopping at walls and sliding along
+# them. The body is a box from a step above the feet to the mode's height, so steps, ramps and
+# bumps stay walkable while posts, walls, the beam and the tunnel roof block.
+func slide(from: Vector3, to: Vector3, mode: int, s: float) -> Vector3:
+	var d := Vector3(to.x - from.x, 0, to.z - from.z)
+	if not visible or _course == null or d.length() < 1e-6:
+		return to
+	var lo := STEP_UP * s + 0.01
+	var hi: float = BODY_HEIGHT[clampi(mode, 0, 2)] * s
+	var box := BoxShape3D.new()
+	box.size = Vector3(BODY_RADIUS * 2.0 * s, max(hi - lo, 0.02), BODY_RADIUS * 2.0 * s)
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = box
+	q.collision_mask = 1
+	var at := Vector3(from.x, from.y + (lo + hi) * 0.5, from.z)
+	var space := get_world_3d().direct_space_state
+	for i in 2:
+		q.transform = Transform3D(Basis(), at)
+		q.motion = d
+		var f := space.cast_motion(q)
+		if f.is_empty() or f[0] >= 1.0:
+			at += d
+			break
+		at += d * f[0]
+		# Slide: keep the part of the rest of the move along the wall.
+		q.transform = Transform3D(Basis(), at + d * (f[1] - f[0]))
+		q.motion = Vector3.ZERO
+		var hit := space.get_rest_info(q)
+		var n: Vector3 = hit.get("normal", Vector3.ZERO)
+		n.y = 0
+		if n.length() < 1e-4:
+			break
+		n = n.normalized()
+		d *= 1.0 - f[0]
+		d -= n * d.dot(n)
+		if d.length() < 1e-6:
+			break
+	return Vector3(at.x, to.y, at.z)
 
 
 # The floor height under p: the highest course top within STEP_UP of the current height, else

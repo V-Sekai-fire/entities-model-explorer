@@ -85,6 +85,8 @@ var _pad_prev := {}
 var _origin := Vector3.ZERO
 var _clip := -1
 var _last_world := Vector3.ZERO
+# How far the course's walls have held the model back from where root motion put it.
+var _push := Vector3.ZERO
 var _test := false
 var _test_opened := false
 var _test_input := Vector2.ZERO
@@ -953,6 +955,7 @@ func _begin() -> void:
 	on = true
 	add_to_group("walk_mode")
 	_last_world = _origin
+	_push = Vector3.ZERO
 	if course:
 		var vc := _view_cam()
 		course.place(_origin, -vc.global_transform.basis.z if vc else Vector3(0, 0, -1), _scale)
@@ -1070,6 +1073,10 @@ func _process(delta: float) -> void:
 	# On the obstacle course the model stands on what is under it: up a step at once, down at a
 	# rate, so it drops off a ledge over a few frames rather than in one.
 	if course and course.visible:
+		# Walls block: the move slides along anything taller than a step, for the mode's height.
+		var raw := char_scene
+		char_scene = course.slide(_last_world, raw + _push, _mode, _scale)
+		_push = Vector3(char_scene.x - raw.x, 0, char_scene.z - raw.z)
 		var gy := course.ground(Vector3(char_scene.x, _last_world.y, char_scene.z), _origin.y)
 		char_scene.y = (
 			gy if gy >= _last_world.y else lerp(_last_world.y, gy, 1.0 - exp(-dt * 12.0))
@@ -1216,7 +1223,7 @@ func _run_test() -> void:
 			var hw := _hips_world()
 			if step[0] == "course" and course and Engine.get_process_frames() % 36 == 0:
 				var lc := course.to_local(_last_world)
-				print("COURSE-AT t=%.2f along=%.2f m height=%.2f m" % [t, -lc.z, lc.y])
+				print("COURSE-AT t=%.2f along=%.2f m height=%.2f m held=%.2f m" % [t, -lc.z, lc.y, _push.length() / _scale])
 			var step_m := Vector2(hw.x - hips_prev.x, hw.z - hips_prev.z).length()
 			# In units of the longest honest frame step: running for the 1/20 s frame cap.
 			leap = max(leap, step_m / (_run_speed * _scale / 20.0))

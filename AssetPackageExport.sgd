@@ -58,9 +58,9 @@ func finger_name(side: String, finger: int, k: int) -> String:
 func finger_from_vrm() -> Dictionary:
 	var out := {}
 	for side in ["Left", "Right"]:
-		var low := side.to_lower()
+		var low: String = side.to_lower()
 		for f in FINGERS.size():
-			var vrm_parts := ["Metacarpal", "Proximal", "Distal"] if f == 0 else PHALANGES
+			var vrm_parts: Array = ["Metacarpal", "Proximal", "Distal"] if f == 0 else PHALANGES
 			for k in 3:
 				out[low + FINGERS[f] + vrm_parts[k]] = finger_name(side, f, k)
 	return out
@@ -779,17 +779,17 @@ func avatar_yaml(nodes: Array, human: Dictionary) -> String:
 		var finger: bool = row.size() > 6
 		var length := child_len
 		if finger:
-			var parts := n.split(" ")
-			var k := PHALANGES.find(parts[2])
-			if k < 2:
-				var next := "%s %s %s" % [parts[0], parts[1], PHALANGES[k + 1]]
+			var parts: PackedStringArray = n.split(" ")
+			var ph: int = PHALANGES.find(parts[2])
+			if ph < 2:
+				var next := "%s %s %s" % [parts[0], parts[1], PHALANGES[ph + 1]]
 				if human.has(next):
 					direction = pos[next] - pos[n]
 			else:
 				var prev := "%s %s %s" % [parts[0], parts[1], PHALANGES[1]]
 				if human.has(prev):
 					direction = pos[n] - pos[prev]
-			length = direction.length() * (0.5625 if k == 2 else 1.0)
+			length = direction.length() * (0.5625 if ph == 2 else 1.0)
 		elif n == "Head":
 			length = (pos["Head"] - pos["Neck"]).length() if human.has("Neck") else 0.1
 		elif n.ends_with("Hand"):

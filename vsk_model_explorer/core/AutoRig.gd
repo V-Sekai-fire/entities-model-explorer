@@ -407,6 +407,17 @@ func add_blink(path: String, source_path: String) -> void:
 		print("AUTO-RIG-BLINK ", JSON.stringify(fb.report))
 
 
+# Instruction budget, in millions, for native_package on a .vrm of `bytes` bytes. Measured on
+# macOS: a 15.7 MB .vrm needs 4000-8000 M, a 31.4 MB .vrm (198,248 vertices) 8000-12000 M, so
+# about 400 M per MB; 1000 M per MB keeps a wide margin and still stops a program that loops.
+# AUTO_RIG_PLANT=asset-package-budget gives 1000 M: a test control that must stop the program
+# and still exit cleanly.
+func asset_package_budget(bytes: int) -> int:
+	if OS.get_environment("AUTO_RIG_PLANT") == "asset-package-budget":
+		return 1000
+	return maxi(8000, 1000 * (bytes >> 20))
+
+
 # The asset package beside the saved .vrm (AssetPackageExport.sgd). A failure here is logged
 # and returns "": the .vrm is still the result.
 func add_asset_package(vrm_path: String) -> String:
@@ -416,7 +427,8 @@ func add_asset_package(vrm_path: String) -> String:
 		return ""
 	show_status("Auto-rig: writing the asset package...")
 	var t0 := Time.get_ticks_msec()
-	var ex = load(ASSET_PACKAGE).new()
+	var script = load(ASSET_PACKAGE)
+	var ex = script.new()
 	if ex == null or not ex.has_method("native_package"):
 		print("AUTO-RIG-ASSET-PACKAGE skipped: AssetPackageExport.sgd did not compile")
 		return ""
@@ -427,12 +439,21 @@ func add_asset_package(vrm_path: String) -> String:
 		print(
 			"AUTO-RIG-ASSET-PACKAGE without lilToon: no ", LILTOON_TAR, " (tools/liltoon_pack.gd)"
 		)
-	var pkg: PackedByteArray = ex.native_package(
-		vrm, name, ex.view_position(vrm), credits(vrm, name), vendored
-	)
-	if pkg.is_empty():
-		print("AUTO-RIG-ASSET-PACKAGE skipped: ", ex.get("last_error"))
+	var budget := asset_package_budget(vrm.size())
+	var sb = script.get_sandbox_for(ex) if script.has_method("get_sandbox_for") else null
+	if sb != null:
+		sb.set_instructions_max(budget)
+	# Untyped: a guest that stops (instruction budget, fault) returns null, not a PackedByteArray.
+	var got = ex.native_package(vrm, name, ex.view_position(vrm), credits(vrm, name), vendored)
+	if typeof(got) != TYPE_PACKED_BYTE_ARRAY or (got as PackedByteArray).is_empty():
+		var why = (
+			ex.get("last_error")
+			if typeof(got) == TYPE_PACKED_BYTE_ARRAY
+			else "the package program stopped"
+		)
+		print("AUTO-RIG-ASSET-PACKAGE skipped: ", why, " (budget ", budget, " M instructions)")
 		return ""
+	var pkg: PackedByteArray = got
 	# The format's own file extension: importers need it as written.
 	var out := vrm_path.get_basename().trim_suffix(".tpose") + ".unitypackage"
 	var f := FileAccess.open(out, FileAccess.WRITE)

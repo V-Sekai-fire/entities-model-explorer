@@ -95,6 +95,7 @@ E
     for d in "$set"/*/; do
       k=$(basename "$d")
       cp "$d/transforms.f32" "$src/motion/mm/$k.f32"
+      [ ! -f "$d/phase.f32" ] || cp "$d/phase.f32" "$src/motion/mm/$k.phase.f32"
       if [ -f "$d/loop.txt" ]; then printf '%s\tloop\n' "$k"; else echo "$k"; fi >> "$src/motion/mm/clips.tsv"
       [ -n "$first" ] || first=$d
     done

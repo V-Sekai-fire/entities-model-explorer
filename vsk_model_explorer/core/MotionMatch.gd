@@ -499,6 +499,14 @@ func _bake() -> bool:
 		if not r.begins_with("ADDED"):
 			_fail(r)
 			return false
+		# The clip's learned gait phase, when the package has one.
+		var ph_path := DIR.path_join(k + ".phase.f32")
+		if FileAccess.file_exists(ph_path):
+			var ph := FileAccess.get_file_as_bytes(ph_path).to_float32_array()
+			r = str(_mm.vmcall("mm_clip_phase", _keys.find(k), ph))
+			if not r.begins_with("PHASE"):
+				_fail(r)
+				return false
 	var baked := str(_mm.vmcall("mm_bake"))
 	print("MOVE-BAKE ", baked)
 	if not baked.begins_with("BAKED"):

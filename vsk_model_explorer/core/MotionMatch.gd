@@ -1319,6 +1319,7 @@ func _run_test() -> void:
 			get_viewport().get_texture().get_image().save_png(shots + "-%s.png" % step[0])
 		ok = ok and good
 	if only != "":
+		_print_card()
 		print("MOVE-VIDEO-DONE steps=%s" % only)
 		get_tree().quit(0)
 		return
@@ -1529,3 +1530,13 @@ func _key_test() -> bool:
 		)
 	)
 	return good
+
+
+# Where the help card sits: CARD-OK when all of it is inside the window, else CARD-CLIPPED.
+func _print_card() -> void:
+	var ar = status.get_object() if status.is_valid() else null
+	if ar == null or not ar.has_method("card_rect"):
+		return
+	var r: Rect2 = ar.card_rect()
+	var win := get_viewport().get_visible_rect()
+	print("%s rect=%s window=%s" % ["CARD-OK" if win.encloses(r) else "CARD-CLIPPED", r, win.size])

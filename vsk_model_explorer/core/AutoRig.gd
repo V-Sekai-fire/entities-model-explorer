@@ -124,6 +124,11 @@ func available() -> bool:
 	return true
 
 
+# The message card's place on screen, for tests.
+func card_rect() -> Rect2:
+	return (_label.get_parent() as Control).get_global_rect()
+
+
 func show_status(text: String) -> void:
 	_label.text = text
 	# Fit the widest line, but never past the window's right edge (16 px margins).

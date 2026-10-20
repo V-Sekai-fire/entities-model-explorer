@@ -261,8 +261,9 @@ cmd("sketch.dimension", entities=["ro"], type="diameter", value="ring_d")
 cmd("sketch.dimension", entities=["ri"], type="diameter", value="ring_d - 2 * ring_t")
 cmd("sketch.dimension", entities=["origin", "ro.center"], type="vertical", value="ring_d / 2 + pad")
 cmd("sketch.finish")
+# The profile whose outer loop is the outer circle: the inner circle is its hole, a ring.
 cmd("solid.extrude", sketch="Ring", distance="ring_depth", direction="positive", operation="new",
-    body_name="FinishRing", profiles="all")
+    body_name="FinishRing", profiles=[{"curves": ["ro"]}])
 outline("FinishPad", "XY", "0 mm", ["f1", "f2", "f3", "f4"],
         [[56000, -1800], [58400, -1800], [58400, 1800], [56000, 1800]],
         [length("f1", "start_len"), length("f2", "course_w"), v("origin", "f1.start", "course_w / 2"),

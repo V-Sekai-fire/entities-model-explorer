@@ -9,6 +9,11 @@ extends Node
 # A .vrm keeps its own skeleton: R saves it as VRM 1.0 (godot-vrm), puts it in a T-pose from any
 # pose and turns each joint's +Y along its bone (skintokens.elf, no weights), as <name>.tpose.vrm.
 # Every saved .vrm without one-eye blinks gets headfit.elf's anime eye closes (FaceBlink.gd).
+# Every saved .vrm also gets <name>.unitypackage beside it: text YAML source assets (prefab, Mesh,
+# humanoid Avatar, materials, textures, CREDITS.txt) written by UnitypackageExport.sgd, compiled
+# GDScript run in the godot-sandbox guest. Materials use lilToon, and the package carries lilToon
+# itself (MIT, vendored at thirdparty/lilToon, packed by tools/liltoon_pack.gd into LILTOON_TAR),
+# so the target project needs only the avatar SDK.
 # An opened .usd, .usda, .usdc or .usdz file is rigged from the GLB the viewer made of it
 # (UsdImport.gd), and the result (<name>.vrm or <name>.rigged.glb) goes beside the USD file.
 # In the browser (web build) the rig runs on the page, not here: the page opens the rigged GLB in
@@ -18,12 +23,18 @@ extends Node
 # then quits with 0, or with 1 on any failure.
 
 signal rigged(path: String)
+# The .unitypackage written with the last saved .vrm, or "".
+var package_path := ""
 
 const CARD_STYLE := "res://vsk_model_explorer/core/CardStyle.gd"
 const Bintr = preload("res://vsk_model_explorer/core/Bintr.gd")
 const ELF := "res://skintokens.elf"
 const VrmExport := preload("res://vsk_model_explorer/core/VrmExport.gd")
 const FaceBlink := preload("res://vsk_model_explorer/core/FaceBlink.gd")
+# Loaded when used: the .sgd compiles only where the godot-sandbox library is present.
+const UNITYPACKAGE := "res://vsk_model_explorer/core/UnitypackageExport.sgd"
+# tools/liltoon_pack.gd writes it (package_desktop.sh pck runs it before the export).
+const LILTOON_TAR := "res://vsk_model_explorer/liltoon.tar"
 const WAIT_GPU := 1
 const READ := 2
 const UPLOAD := 3
@@ -134,6 +145,7 @@ func start() -> void:
 		busy = false
 		if posed != "":
 			download(posed)
+			download(package_path, "application/gzip")
 			show_saved(posed)
 			_test_rigged = true
 			rigged.emit(posed)
@@ -175,23 +187,19 @@ func start_web() -> void:
 			)
 		return
 	download(vrm)
+	download(package_path, "application/gzip")
 	show_saved(vrm.get_file())
 	_test_rigged = true
 	rigged.emit(vrm)
 
 
 # Web: the browser downloads the file (the user folder is not visible to the user).
-func download(path: String) -> void:
-	if not OS.has_feature("web"):
+func download(path: String, mime := "model/gltf-binary") -> void:
+	if path == "" or not OS.has_feature("web"):
 		return
 	var bridge := Engine.get_singleton("JavaScriptBridge")
 	if bridge:
-		bridge.call(
-			"download_buffer",
-			FileAccess.get_file_as_bytes(path),
-			path.get_file(),
-			"model/gltf-binary"
-		)
+		bridge.call("download_buffer", FileAccess.get_file_as_bytes(path), path.get_file(), mime)
 		print("AUTO-RIG-DOWNLOAD ", path.get_file())
 
 
@@ -381,6 +389,7 @@ func run_vrm(path: String, out_path := "") -> String:
 	f.close()
 	print("AUTO-RIG-OK %s bytes=%d ms=%d" % [out, bytes.size(), Time.get_ticks_msec() - t0])
 	add_blink(out, path)
+	package_path = add_unitypackage(out)
 	return out
 
 
@@ -396,6 +405,92 @@ func add_blink(path: String, source_path: String) -> void:
 		print("AUTO-RIG-BLINK skipped: ", fb.report.skipped)
 	else:
 		print("AUTO-RIG-BLINK ", JSON.stringify(fb.report))
+
+
+# <name>.unitypackage beside the saved .vrm (UnitypackageExport.sgd). A failure here is logged
+# and returns "": the .vrm is still the result.
+func add_unitypackage(vrm_path: String) -> String:
+	package_path = ""
+	if not ResourceLoader.exists(UNITYPACKAGE):
+		print("AUTO-RIG-UNITYPACKAGE skipped: no ", UNITYPACKAGE)
+		return ""
+	show_status("Auto-rig: writing .unitypackage...")
+	var t0 := Time.get_ticks_msec()
+	var ex = load(UNITYPACKAGE).new()
+	if ex == null or not ex.has_method("native_package"):
+		print("AUTO-RIG-UNITYPACKAGE skipped: UnitypackageExport.sgd did not compile")
+		return ""
+	var vrm := FileAccess.get_file_as_bytes(vrm_path)
+	var name := package_name(vrm_path)
+	var vendored := FileAccess.get_file_as_bytes(LILTOON_TAR)
+	if vendored.is_empty():
+		print("AUTO-RIG-UNITYPACKAGE without lilToon: no ", LILTOON_TAR, " (tools/liltoon_pack.gd)")
+	var pkg: PackedByteArray = ex.native_package(
+		vrm, name, ex.view_position(vrm), credits(vrm, name), vendored
+	)
+	if pkg.is_empty():
+		print("AUTO-RIG-UNITYPACKAGE skipped: ", ex.get("last_error"))
+		return ""
+	var out := vrm_path.get_basename().trim_suffix(".tpose") + ".unitypackage"
+	var f := FileAccess.open(out, FileAccess.WRITE)
+	if f == null:
+		out = OS.get_user_data_dir().path_join(out.get_file())
+		f = FileAccess.open(out, FileAccess.WRITE)
+	if f == null:
+		print("AUTO-RIG-UNITYPACKAGE skipped: cannot write ", out)
+		return ""
+	f.store_buffer(pkg)
+	f.close()
+	print("AUTO-RIG-UNITYPACKAGE %s bytes=%d ms=%d" % [out, pkg.size(), Time.get_ticks_msec() - t0])
+	return out
+
+
+# The folder and asset name in the package: the file name, with only letters, digits, - and _.
+static func package_name(vrm_path: String) -> String:
+	var base := vrm_path.get_file().get_basename().trim_suffix(".tpose")
+	var name := ""
+	for c in base:
+		name += c if (c.is_valid_identifier() or c.is_valid_int() or c == "-") else "_"
+	return name if name != "" else "Avatar"
+
+
+# CREDITS.txt: the opened file's glTF asset.extras (title, author, source, licence; Sketchfab
+# writes these), else the VRM meta.
+func credits(vrm: PackedByteArray, name: String) -> String:
+	var extras: Dictionary = glb_json_file(source).get("asset", {}).get("extras", {})
+	var meta: Dictionary = {}
+	if vrm.size() > 20:
+		var root = JSON.parse_string(vrm.slice(20, 20 + vrm.decode_u32(12)).get_string_from_utf8())
+		if root is Dictionary:
+			meta = root.get("extensions", {}).get("VRMC_vrm", {}).get("meta", {})
+	var authors: Array = meta.get("authors", ["Unknown"])
+	var rig := (
+		"Rig from the source file"
+		if source.get_extension().to_lower() == "vrm"
+		else "Rigged by SkinTokens (skintokens.elf)"
+	)
+	return (
+		"%s\nby %s\n%s\nLicence: %s\n\n%s; converted by the SkinTokens viewer.\n"
+		% [
+			extras.get("title", meta.get("name", name)),
+			extras.get("author", ", ".join(authors)),
+			extras.get("source", ""),
+			extras.get("license", meta.get("licenseUrl", "")),
+			rig
+		]
+	)
+
+
+static func glb_json_file(path: String) -> Dictionary:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null or f.get_length() < 20 or f.get_32() != 0x46546C67:
+		return {}
+	f.seek(12)
+	var size := f.get_32()
+	if f.get_32() != 0x4E4F534A or size > f.get_length():
+		return {}
+	var root = JSON.parse_string(f.get_buffer(size).get_string_from_utf8())
+	return root if root is Dictionary else {}
 
 
 # True when the file's glTF JSON carries the VRM 1.0 extension (VRMC_vrm).

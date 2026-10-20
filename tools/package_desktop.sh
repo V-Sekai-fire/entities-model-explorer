@@ -97,9 +97,12 @@ E
   cp "$first/parents.txt" "$src/motion/mm/parents.txt"
   G="$ENGINE/godot.macos.editor.double.arm64"
   "$G" --headless --path "$src" --import > "$out/import.log" 2>&1 || true
+  # lilToon (thirdparty/lilToon) as .unitypackage members, carried by every exported package.
+  "$G" --headless --path "$src" --script tools/liltoon_pack.gd > "$out/liltoon_pack.log" 2>&1 \
+    || { cat "$out/liltoon_pack.log"; exit 1; }
   "$G" --headless --path "$src" --export-pack Linux "$out/skintokens-viewer.pck" > "$out/export.log" 2>&1
   if grep -q "SCRIPT ERROR" "$out/export.log"; then echo "SCRIPT ERROR in export.log"; exit 1; fi
-  for f in skintokens.elf usd.elf motion.elf headfit.elf mm.elf godot-riscv.gdextension AutoRig.gd FaceBlink.gd FaceRoles.gd UsdImport.gd Motion.gd MotionMatch.gd Bintr.gd clips.tsv walk.f32 mm/skeleton.txt; do
+  for f in skintokens.elf usd.elf motion.elf headfit.elf mm.elf liltoon.tar UnitypackageExport.sgd godot-riscv.gdextension AutoRig.gd FaceBlink.gd FaceRoles.gd UsdImport.gd Motion.gd MotionMatch.gd Bintr.gd clips.tsv walk.f32 mm/skeleton.txt; do
     grep -aq "$f" "$out/skintokens-viewer.pck" || { echo "pck lacks $f"; exit 1; }
   done
   echo "PCK-OK $(wc -c < "$out/skintokens-viewer.pck") bytes"

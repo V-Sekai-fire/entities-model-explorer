@@ -41,6 +41,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func set_on(on: bool) -> void:
 	visible = on
+	# The course has its own solid floor; the grid's thin lines shimmer over it in motion
+	# (too fine to draw steadily at a distance), so the grid plane is hidden while it is on.
+	var plane := get_parent().get_node_or_null("GizmoPlane") as Node3D if get_parent() else null
+	if plane:
+		plane.visible = not on
 	if on and _course == null:
 		_build()
 	if _course:

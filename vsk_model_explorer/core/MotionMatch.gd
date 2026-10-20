@@ -1435,6 +1435,13 @@ func _start_orbit() -> void:
 		return
 	var at := Transform3D(cc.global_transform.basis, cc.global_position)
 	_orbit_rel = at.affine_inverse() * _input_cam.global_transform
+	# Step back so the whole model and a few metres of grid are in view, and look down a bit more.
+	_orbit_rel.origin *= 2.5
+	_orbit_rel = Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-10.0)), Vector3.ZERO) * _orbit_rel
+	# The video shows the scene only: hide the panels and cards.
+	for n in get_parent().find_children("*", "Control", true, false):
+		if not n.get_parent() is Control:
+			(n as Control).visible = false
 	_orbit_cam = Camera3D.new()
 	_orbit_cam.fov = _input_cam.fov
 	_orbit_cam.far = _input_cam.far

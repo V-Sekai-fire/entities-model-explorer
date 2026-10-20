@@ -26,7 +26,8 @@
 #   MUJOCO_ELF  mujoco.elf, double-precision build (mujoco-sandbox-demo project/plans/
 #            mujoco.double.elf), the obstacle course's colliders
 #   MM_DATA  that repo's clip dirs, ':'-separated (data/kimodo-locomotion:data/o3de-motionmatching):
-#            one dir per clip (transforms.f32, skeleton.txt, parents.txt), the controller's pose
+#            one dir per clip (transforms.f32, skeleton.txt, parents.txt, and loop.txt for a
+#            steady gait cut as a loop), the controller's pose
 #            database; written into res://motion/mm/
 #   NOTICES  dir with LICENSE.md, NOTICE and CITATION.cff for the viewer, as written by
 #            tools/licences/licgen.py and published in its HF download repo
@@ -94,7 +95,7 @@ E
     for d in "$set"/*/; do
       k=$(basename "$d")
       cp "$d/transforms.f32" "$src/motion/mm/$k.f32"
-      echo "$k" >> "$src/motion/mm/clips.tsv"
+      if [ -f "$d/loop.txt" ]; then printf '%s\tloop\n' "$k"; else echo "$k"; fi >> "$src/motion/mm/clips.tsv"
       [ -n "$first" ] || first=$d
     done
   done

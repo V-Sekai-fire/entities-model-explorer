@@ -488,10 +488,14 @@ func _bake() -> bool:
 			return false
 	_mm.vmcall("mm_clear")
 	_keys = clip_keys()
+	var loops := {}
+	for line in FileAccess.get_file_as_string(DIR.path_join("clips.tsv")).split("\n", false):
+		var w := line.split("\t")
+		loops[w[0]] = w.size() > 1 and w[1] == "loop"
 	var soma := _soma()
 	for k in _keys:
 		var xf := FileAccess.get_file_as_bytes(DIR.path_join(k + ".f32")).to_float32_array()
-		var r := str(_mm.vmcall("mm_add_clip", k, soma.names, soma.parents, xf, 30.0))
+		var r := str(_mm.vmcall("mm_add_clip", k, soma.names, soma.parents, xf, 30.0, 1 if loops[k] else 0))
 		if not r.begins_with("ADDED"):
 			_fail(r)
 			return false

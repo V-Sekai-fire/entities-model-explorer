@@ -96,7 +96,10 @@ E
       k=$(basename "$d")
       cp "$d/transforms.f32" "$src/motion/mm/$k.f32"
       [ ! -f "$d/phase.f32" ] || cp "$d/phase.f32" "$src/motion/mm/$k.phase.f32"
-      if [ -f "$d/loop.txt" ]; then printf '%s\tloop\n' "$k"; else echo "$k"; fi >> "$src/motion/mm/clips.tsv"
+      fps=$(awk '/^frames / {print $4}' "$d/skeleton.txt")
+      [ -n "$fps" ] || { echo "$d/skeleton.txt has no frame rate"; exit 1; }
+      if [ -f "$d/loop.txt" ]; then kind=loop; else kind=once; fi
+      printf '%s\t%s\t%s\n' "$k" "$kind" "$fps" >> "$src/motion/mm/clips.tsv"
       [ -n "$first" ] || first=$d
     done
   done

@@ -421,6 +421,16 @@ static func clip_loops() -> Dictionary:
 	return out
 
 
+# Each clip's frame rate, clips.tsv's third column: clips stay at the rate they were made at
+# (Kimodo 30 fps, the O3DE recordings 60 fps). A row without one is an error, not 30.
+static func clip_fps() -> Dictionary:
+	var out := {}
+	for line in FileAccess.get_file_as_string(DIR.path_join("clips.tsv")).split("\n", false):
+		var w := line.split("	")
+		out[w[0]] = float(w[2]) if w.size() > 2 else 0.0
+	return out
+
+
 static func _soma() -> Dictionary:
 	var names := FileAccess.get_file_as_string(DIR.path_join("skeleton.txt")).strip_edges()
 	var parents := PackedInt32Array()
@@ -432,6 +442,7 @@ static func _soma() -> Dictionary:
 func _make_moves() -> String:
 	var t0 := Time.get_ticks_msec()
 	var keys := clip_keys()
+	var rates := clip_fps()
 	var soma := _soma()
 	var dir := OS.get_user_data_dir().path_join("moves")
 	DirAccess.make_dir_recursive_absolute(dir)
@@ -453,7 +464,7 @@ func _make_moves() -> String:
 				soma.names,
 				soma.parents,
 				xf,
-				30.0
+				rates[keys[i]]
 			)
 		)
 		if not started.begins_with("STARTED"):
@@ -499,11 +510,15 @@ func _bake() -> bool:
 	_mm.vmcall("mm_clear")
 	_keys = clip_keys()
 	var loops := clip_loops()
+	var rates := clip_fps()
 	var soma := _soma()
 	for k in _keys:
+		if rates[k] <= 0.0:
+			_fail("clips.tsv gives %s no frame rate" % k)
+			return false
 		var xf := FileAccess.get_file_as_bytes(DIR.path_join(k + ".f32")).to_float32_array()
 		var r := str(
-			_mm.vmcall("mm_add_clip", k, soma.names, soma.parents, xf, 30.0, 1 if loops[k] else 0)
+			_mm.vmcall("mm_add_clip", k, soma.names, soma.parents, xf, rates[k], 1 if loops[k] else 0)
 		)
 		if not r.begins_with("ADDED"):
 			_fail(r)

@@ -2,19 +2,21 @@
 # Build, test and publish the desktop viewers (SkinTokens viewer and walk-mode viewer) in one run.
 #
 #   pixi run release                          from the smoke-water root (release.exs is linked
-#                                             there by the manifest); publishes to branch dev
+#                                             there by the manifest); publishes to branch dev.
+#                                             No arguments are needed, on the Mac or the WSL desk
 #   pixi run release --publish main           publish to main instead (the Spaces link main)
 #   pixi run release --publish none           build and test only
 #   pixi run release --ref <model-explorer ref>   default origin/main
 #   pixi run release --resume <dir>           continue a stopped run; finished steps are skipped
 #                                             (new runs go under $RELEASE_ROOT, default D: on the
-#                                             WSL desk, else <root>/.release)
+#                                             WSL desk when it is mounted, else <root>/.release)
 #   pixi run release --until <step>           stop after a step (see @steps)
 #   pixi run release --branch <repo>=<branch> take that guest's ELF from its newest green run on
 #                                             <branch> instead of main (a release candidate);
 #                                             repeat for more repos, the source is recorded
 #
-# Run it on the WSL desk: the Windows tests run on this machine, the macOS image is built and
+# It runs on the WSL desk; started on the Mac, it copies itself to the desk (RELEASE_DESK, default
+# ssh host `desk`) and runs there. The Windows tests run on the desk, the macOS image is built and
 # tested on the Mac over ssh (RELEASE_MAC, default ernest.lee@100.64.202.51), the Linux test runs
 # in WSLg. Every input comes from a green main CI run, a release, or a pinned checkout, and its
 # source is written to <dir>/SOURCES.txt:
@@ -53,7 +55,12 @@ defmodule Release do
   ]
 
   def main(argv) do
-    case run(argv) do
+    result = if :os.type() == {:unix, :darwin}, do: forward(argv), else: run(argv)
+
+    case result do
+      {:ok, :forwarded} ->
+        0
+
       {:ok, dir} ->
         IO.puts("RELEASE-OK #{dir}")
         0
@@ -86,7 +93,8 @@ defmodule Release do
       steps = Enum.take_while(@steps, &(&1 != until)) ++ [until]
 
       Enum.reduce_while(steps, {:ok, dir}, fn step, acc ->
-        marker = Path.join([dir, ".done", step])
+        # Publishing to dev and then to main from the same folder are two different steps.
+        marker = Path.join([dir, ".done", if(step == "publish", do: "publish-" <> publish, else: step)])
 
         if File.exists?(marker) do
           IO.puts("== #{step}: done in an earlier run")
@@ -103,6 +111,31 @@ defmodule Release do
     end
   end
 
+  # On the Mac, `pixi run release` hands the run to the WSL desk (RELEASE_DESK, an ssh host whose
+  # login shell is Windows cmd; RELEASE_DESK_ROOT is the desk's client root). The desk runs THIS
+  # copy of the script, so a release always uses the Mac client's release.exs. Output streams back.
+  defp forward(argv) do
+    desk = System.get_env("RELEASE_DESK") || "desk"
+    root = System.get_env("RELEASE_DESK_ROOT") || "~/smoke-water"
+    body = File.read!(__ENV__.file)
+    name = "release-" <> String.slice(hex(:crypto.hash(:sha256, body)), 0, 12) <> ".exs"
+    args = Enum.map_join(argv, " ", &("'" <> String.replace(&1, "'", "'\\''") <> "'"))
+    # The desk's ssh shell is cmd: scp lands in the Windows profile, and cmd expands %USERPROFILE%
+    # in the command line before wsl starts, so bash can find the copy there.
+    sh = "cd #{root} && mkdir -p .release && mv $(wslpath '%USERPROFILE%')/#{name} .release/ && exec ~/.pixi/bin/pixi run -e release elixir .release/#{name} #{args}"
+    tmp = Path.join(System.tmp_dir!(), name)
+
+    IO.puts("release: forwarding to #{desk} (#{root}/.release/#{name})")
+
+    with :ok <- File.write(tmp, body),
+         {:ok, _} <- cap("scp", ["-q", "-o", "BatchMode=yes", tmp, "#{desk}:#{name}"]) do
+      case System.cmd("ssh", ["-o", "BatchMode=yes", desk, "wsl -e bash -lc \"#{sh}\""], into: IO.stream(:stdio, :line), stderr_to_stdout: true) do
+        {_, 0} -> {:ok, :forwarded}
+        {_, n} -> {:error, "the desk run exited #{n}"}
+      end
+    end
+  end
+
   defp workspace_root do
     start = Path.expand(__DIR__)
 
@@ -116,11 +149,12 @@ defmodule Release do
   end
 
   # A release folder holds about 8 GB (three packages per viewer plus the weights). RELEASE_ROOT
-  # picks where; on the WSL desk the default is D:, which has the room the WSL disk lacks.
+  # picks where; on the WSL desk the default is D: when D: is mounted (an unplugged drive leaves
+  # an empty /mnt/d that fails with "No such device"), else the client's .release.
   defp release_root(root) do
     cond do
       r = System.get_env("RELEASE_ROOT") -> r
-      File.dir?("/mnt/d") -> "/mnt/d/smoke-water-release"
+      File.mkdir_p("/mnt/d/smoke-water-release") == :ok -> "/mnt/d/smoke-water-release"
       true -> Path.join(root, ".release")
     end
   end
@@ -573,10 +607,16 @@ defmodule Release do
   def step_publish(%{publish: "none"}), do: (IO.puts("  --publish none: nothing uploaded"); :ok)
 
   def step_publish(ctx) do
-    gate = Path.join(ctx.root, "3-interactor/skintokens-qlora/tools/space_gate.py")
+    # The gate comes from interactor-skintokens-qlora main as fetched now, not from whatever commit
+    # the desk's checkout sits on (an old checkout has no REVISION and would publish to main).
+    q = Path.join(ctx.root, "3-interactor/skintokens-qlora")
+    gd = Path.join(ctx.dir, "gate")
+    gate = Path.join(gd, "tools/space_gate.py")
 
-    # A gate without REVISION would put a dev release on main.
-    with {:ok, g} <- File.read(gate),
+    with {:ok, _} <- cap("git", ["-C", q, "fetch", "-q", "origin", "main"]),
+         :ok <- clean(gd),
+         {:ok, _} <- cap("sh", ["-c", "git -C \"$1\" archive FETCH_HEAD tools | tar -x -C \"$2\"", "sh", q, gd]),
+         {:ok, g} <- File.read(gate),
          true <- ctx.publish == "main" or String.contains?(g, "REVISION") ||
                    {:error, "#{gate} cannot commit to a branch (no REVISION): update the checkout"},
          {:ok, tok} <- hf_token() do

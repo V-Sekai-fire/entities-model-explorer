@@ -36,13 +36,13 @@
 # Functions return {:ok, value} or {:error, reason}; nothing raises.
 
 defmodule Release do
-  @steps ~w(engine sandbox guests weights source notices pck package dmg test_windows test_mac test_linux publish)
+  @steps ~w(engine sandbox guests weights source notices pck package dmg test_windows test_mac test_linux web publish)
   @max_private_mb 8192
   @viewers [
     %{key: "skintokens", app: "skintokens-viewer", name: "SkinTokens Viewer",
-      repo: "chibifire/interactor-skintokens-viewer", rig: true, mac_zip: true},
+      repo: "chibifire/interactor-skintokens-viewer", space: "chibifire/skintokens-auto-rig", rig: true, mac_zip: true, web: false},
     %{key: "walk-mode", app: "walk-mode-viewer", name: "Walk Mode Viewer",
-      repo: "chibifire/interactor-walk-mode-viewer", rig: false, mac_zip: false}
+      repo: "chibifire/interactor-walk-mode-viewer", space: "chibifire/walk-mode", rig: false, mac_zip: false, web: true}
   ]
   @weights ~w(mesh-encoder.gguf skin-vae.gguf tokenrig.gguf)
   @engine_files ~w(godot.linuxbsd.editor.double.x86_64 godot.linuxbsd.template_release.double.x86_64
@@ -604,6 +604,154 @@ defmodule Release do
     end)
   end
 
+  # ---- web viewer (the Spaces' godot/ frame) ---------------------------------------------------
+  #
+  # The web viewer is the same model-explorer source built as godot-sandbox guests (guest/build.py)
+  # and exported with the threaded, double-precision, dlink WebGPU template. No release ships that
+  # template, so it is built here from entities-godot dev/webgpu-rebase with Emscripten
+  # @emsdk_version; the compiler (gdscript_to_riscv) is built from its main. Both live in a cache
+  # folder (RELEASE_CACHE) that later runs build on incrementally; their commits go to SOURCES.txt.
+  @emsdk_version "6.0.12"
+  @web_elfs ~w(skintokens.elf usd.elf mm.elf mujoco.elf headfit.elf)
+
+  def step_web(ctx) do
+    cache = System.get_env("RELEASE_CACHE") || Path.expand("~/.cache/smoke-water-release")
+    d = Path.join(ctx.dir, "web")
+    mmg = Path.join([ctx.dir, "elf", "mmg", "data"])
+
+    with :ok <- File.mkdir_p(cache),
+         :ok <- clean(d),
+         {:ok, tok} <- gh_token("V-Sekai-fire"),
+         {:ok, run} <- sandbox_run(ctx),
+         {:ok, _} <- cap("gh", ["run", "download", run, "-R", "V-Sekai-fire/godot-sandbox", "-n", "godot-sandbox-web-wasm32-double", "-D", Path.join(d, "sandbox-web")], gh_env(tok)),
+         {:ok, log} <- cap("bash", ["-c", web_script(), "web", ctx.root, cache, d, ctx.dir, @emsdk_version, Enum.join(@web_elfs, " ")],
+                           [{"MM_DATA", Path.join(mmg, "kimodo-locomotion") <> ":" <> Path.join(mmg, "o3de-motionmatching")}]),
+         true <- String.contains?(log, "WEB-OK") || {:error, "web build printed no WEB-OK: #{tail(log)}"},
+         [_, gsha, csha] <- Regex.run(~r/WEB-OK godot (\w+) compiler (\w+)/, log) || {:error, "no commits in the web log"},
+         out = Path.join(d, "out"),
+         {:ok, html} <- File.read(Path.join(out, "index.html")),
+         {:ok, shell} <- web_shell(html),
+         :ok <- File.write(Path.join(out, "index.html"), shell),
+         {:ok, bin} <- File.read(Path.join(out, "index.pck")),
+         {:ok, files} <- pck_files(bin),
+         :ok <- web_pck_check(ctx, files) do
+      source(ctx, "web template V-Sekai-fire/entities-godot dev/webgpu-rebase #{gsha} (Emscripten #{@emsdk_version}); compiler V-Sekai-fire/entities-godot-sandbox-gdscript-compiler #{csha}; web sandbox library from Builds run #{run}")
+    end
+  end
+
+  defp sandbox_run(ctx) do
+    with {:ok, s} <- File.read(Path.join(ctx.dir, "SOURCES.txt")),
+         [_, run] <- Regex.run(~r/^sandbox V-Sekai-fire\/godot-sandbox Builds run (\d+)/m, s) || {:error, "SOURCES.txt has no sandbox run"} do
+      {:ok, run}
+    end
+  end
+
+  # Each guest ELF in the web pck equals the release's ELF, and the walk clips are in it.
+  defp web_pck_check(ctx, files) do
+    elf = Path.join(ctx.dir, "elf")
+
+    with :ok <- Enum.reduce_while(@web_elfs, :ok, fn f, _ ->
+           case {File.read(Path.join(elf, f)), Map.fetch(files, f)} do
+             {{:ok, b}, {:ok, b}} -> {:cont, :ok}
+             {{:ok, _}, {:ok, _}} -> {:halt, {:error, "#{f} in the web pck differs from its input"}}
+             {{:ok, _}, :error} -> {:halt, {:error, "the web pck lacks #{f}"}}
+             {e, _} -> {:halt, e}
+           end
+         end),
+         {:ok, tsv} <- Map.fetch(files, "motion/mm/clips.tsv") |> ok_or("the web pck lacks motion/mm/clips.tsv"),
+         n = tsv |> String.split("\n", trim: true) |> length(),
+         loops = tsv |> String.split("\n", trim: true) |> Enum.count(&String.ends_with?(&1, "\tloop")),
+         true <- (n > 0 and loops > 0 and loops < n) || {:error, "web clips.tsv has #{n} clips, #{loops} loops"} do
+      IO.puts("  web pck: #{map_size(files)} files, #{n} walk clips (#{loops} loops)")
+      :ok
+    end
+  end
+
+  defp ok_or({:ok, v}, _), do: {:ok, v}
+  defp ok_or(_, msg), do: {:error, msg}
+
+  defp web_script do
+    ~S"""
+    set -euo pipefail
+    R=$1 C=$2 D=$3 REL=$4 EMV=$5 ELFS=$6
+    [ -d "$C/emsdk" ] || git clone -q https://github.com/emscripten-core/emsdk "$C/emsdk"
+    (cd "$C/emsdk" && git pull -q && ./emsdk install "$EMV" >/dev/null && ./emsdk activate "$EMV" >/dev/null)
+    G=$R/4-entities/godot
+    git -C "$G" fetch -q origin dev/webgpu-rebase
+    GS=$(git -C "$G" rev-parse FETCH_HEAD)
+    [ -d "$C/godot-webgpu" ] || git -C "$G" worktree add -q --detach "$C/godot-webgpu" "$GS"
+    git -C "$C/godot-webgpu" checkout -q --detach "$GS"
+    set +u; source "$C/emsdk/emsdk_env.sh" >/dev/null 2>&1; set -u
+    (cd "$C/godot-webgpu" && ~/.pixi/bin/pixi exec --spec scons==4.11.1 --spec sccache -- \
+      scons c_compiler_launcher=sccache cpp_compiler_launcher=sccache platform=web target=template_release \
+      webgpu=yes threads=yes precision=double dlink_enabled=yes -j"$(nproc)" > "$D/template.log" 2>&1) \
+      || { tail -20 "$D/template.log"; exit 1; }
+    TPL=$C/godot-webgpu/bin/godot.web.template_release.double.wasm32.dlink.zip
+    P=$R/4-entities/godot-sandbox-gdscript-compiler
+    git -C "$P" fetch -q origin main
+    CS=$(git -C "$P" rev-parse FETCH_HEAD)
+    [ -d "$C/compiler" ] || git -C "$P" worktree add -q --detach "$C/compiler" "$CS"
+    (cd "$C/compiler" && git checkout -q --detach "$CS" && git submodule update -q --init --recursive \
+      && ~/.pixi/bin/pixi run configure > "$D/compiler.log" 2>&1 \
+      && ~/.pixi/bin/pixi run cmake --build build --target gdscript_to_riscv >> "$D/compiler.log" 2>&1) \
+      || { tail -20 "$D/compiler.log"; exit 1; }
+    mkdir -p "$D/addon/bin"
+    find "$D/sandbox-web" -name 'libgodot_riscv.web.*double*.wasm' -exec cp {} "$D/addon/bin/" \;
+    ls "$D/addon/bin/"libgodot_riscv.web.template_release.double.wasm32.wasm >/dev/null
+    E=""; for f in $ELFS; do E="$E $REL/elf/$f"; done
+    python3 "$REL/model-explorer/guest/build.py" "$D/work" "$C/compiler/build/src/gdscript/compiler/gdscript_to_riscv" \
+      "$D/addon" "$TPL" $E > "$D/guest-build.log" 2>&1 || { grep -E '^BAD|^\{' "$D/guest-build.log" | head; exit 1; }
+    tail -1 "$D/guest-build.log"
+    GD=$REL/engine/godot.linuxbsd.editor.double.x86_64
+    export XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir WAYLAND_DISPLAY=wayland-0
+    mkdir -p "$D/out"
+    "$GD" --display-driver wayland --resolution 640x360 --path "$D/work" --import > "$D/import.log" 2>&1 || true
+    "$GD" --display-driver wayland --resolution 640x360 --path "$D/work" --export-release Web "$D/out/index.html" > "$D/export.log" 2>&1 \
+      || { tail -20 "$D/export.log"; exit 1; }
+    if grep -q "SCRIPT ERROR\|Parse Error" "$D/export.log"; then grep -m5 "SCRIPT ERROR\|Parse Error" "$D/export.log"; exit 1; fi
+    for f in index.html index.js index.wasm index.side.wasm index.pck libgodot_riscv.web.template_release.double.wasm32.wasm; do
+      [ -s "$D/out/$f" ] || { echo "the export lacks $f"; exit 1; }
+    done
+    echo "WEB-OK godot $GS compiler $CS"
+    """
+  end
+
+  # The Space shell: AppSignal in <head> (Space commit as the version), Godot's printed errors and
+  # start failures reported once each, and the disclaimer when the frame is opened on its own.
+  # The disclaimer's insertAdjacentHTML takes a fixed literal, never page or user input.
+  @appsignal_head ~S"""
+  <script src="https://cdn.jsdelivr.net/npm/@appsignal/browser@1.0.0-beta.7/dist/browser.umd.js" integrity="sha384-CWzXW1jdvf+NDcpV/CxtCvagiHvI4AddcUZtqCXhn8JUAL4xM9OMpacAnunN2pcl" crossorigin="anonymous"></script>
+  <script>
+  (function () { var v = "local"; try { var x = new XMLHttpRequest(); x.open("HEAD", location.href.split("#")[0], false); x.send(); v = (x.getResponseHeader("X-Repo-Commit") || v).slice(0, 7); } catch (e) {}
+  try { AppsignalBrowser.init({ key: "43d19674-b7e6-4d77-aae1-edf73c7088c3", endpoint: "https://appsignal-endpoint.net", active: true, appVersion: v }); } catch (e) {} })();
+  </script>
+  """
+  @appsignal_print ~S"""
+  (function () { var seen = new Set(), msg = null; function flush() { if (msg && !seen.has(msg) && seen.size < 50) { seen.add(msg); try { AppsignalBrowser.captureError(new Error(msg)); } catch (e) {} } msg = null; }
+  GODOT_CONFIG.onPrintError = function () { var m = Array.prototype.join.call(arguments, " "); console.error(m);
+  if (/^(SCRIPT )?ERROR:/.test(m)) { flush(); msg = m; queueMicrotask(flush); } else if (msg && msg.length < 4000) { msg += "\n" + m; } }; })();
+  """
+  @appsignal_note ~S"""
+  	<script>if (window.top === window) document.body.insertAdjacentHTML("beforeend", '<p id="appsignal-note" style="position:fixed;left:8px;bottom:4px;margin:0;font:10px/1.3 system-ui,sans-serif;color:#888;opacity:.75;z-index:2147483647;pointer-events:none">This page sends error reports and browser data to AppSignal. We use them to find and correct errors.</p>');</script>
+  """
+
+  def web_shell(html) do
+    fail = "\t\ttry { AppsignalBrowser.captureError(err instanceof Error ? err : new Error(String(err))); } catch (e) {}\n"
+
+    with true <- String.contains?(html, "</title>\n") || {:error, "index.html has no </title>"},
+         true <- String.contains?(html, "const engine = new Engine(GODOT_CONFIG);") || {:error, "index.html has no Engine(GODOT_CONFIG)"},
+         true <- String.contains?(html, "function displayFailureNotice(err) {\n") || {:error, "index.html has no displayFailureNotice"},
+         true <- String.contains?(html, "</body>") || {:error, "index.html has no </body>"},
+         false <- String.contains?(html, "AppsignalBrowser") && {:error, "index.html already has AppSignal"} do
+      {:ok,
+       html
+       |> String.replace("</title>\n", "</title>\n" <> @appsignal_head, global: false)
+       |> String.replace("const engine = new Engine(GODOT_CONFIG);", @appsignal_print <> "const engine = new Engine(GODOT_CONFIG);", global: false)
+       |> String.replace("function displayFailureNotice(err) {\n", "function displayFailureNotice(err) {\n" <> fail, global: false)
+       |> String.replace("</body>", @appsignal_note <> "</body>", global: false)}
+    end
+  end
+
   def step_publish(%{publish: "none"}), do: (IO.puts("  --publish none: nothing uploaded"); :ok)
 
   def step_publish(ctx) do
@@ -633,7 +781,8 @@ defmodule Release do
              env = [{"HF_UPLOAD_TOKEN", tok}, {"REVISION", if(ctx.publish == "main", do: "", else: ctx.publish)},
                     {"MSG", "Release #{ctx.id}"}],
              {:ok, out} <- cap("sh", ["-c", "printf '%s' \"$HF_UPLOAD_TOKEN\" | python \"$@\"", "sh", gate, "push", v.repo, "model", o | files], env),
-             true <- String.contains?(out, "live matches") || {:error, "#{v.repo}: #{tail(out)}"} do
+             true <- String.contains?(out, "live matches") || {:error, "#{v.repo}: #{tail(out)}"},
+             :ok <- (if ctx.publish == "main", do: space_update(ctx, v, o, gate, tok), else: :ok) do
           IO.puts("  #{v.repo}: #{out |> String.split("\n") |> Enum.find("", &String.starts_with?(&1, "commit"))}")
           {:cont, :ok}
         else
@@ -644,6 +793,71 @@ defmodule Release do
   end
 
   # ---- helpers -------------------------------------------------------------------------------
+
+  # Publishing to main also brings the viewer's Space up to date: each download card on its
+  # index.html gets the new SHA-256 and size, and a viewer with `web: true` gets this release's
+  # web viewer as godot/. Dev publishes leave the Spaces alone (they link main).
+  defp space_update(ctx, v, o, gate, tok) do
+    sd = Path.join([ctx.dir, "space", v.key])
+    web = Path.join([ctx.dir, "web", "out"])
+
+    with :ok <- clean(sd),
+         {:ok, _} <- hf_get(tok, "spaces/" <> v.space, "index.html", Path.join(sd, "index.html")),
+         {:ok, html} <- File.read(Path.join(sd, "index.html")),
+         {:ok, html} <- cards(html, o, archives(v)),
+         :ok <- File.write(Path.join(sd, "index.html"), html),
+         {:ok, godot} <- (if v.web, do: copy_web(web, Path.join(sd, "godot")), else: {:ok, []}),
+         env = [{"HF_UPLOAD_TOKEN", tok}, {"REVISION", ""}, {"MSG", "Release #{ctx.id}"}],
+         {:ok, out} <- cap("sh", ["-c", "cd \"$1\" && shift && printf '%s' \"$HF_UPLOAD_TOKEN\" | python \"$@\"", "sh", sd, gate, "push", v.space, "space", "." | ["index.html" | godot]], env),
+         true <- String.contains?(out, "live matches") || {:error, "Space #{v.space}: #{tail(out)}"} do
+      IO.puts("  Space #{v.space}: index.html#{if v.web, do: " + godot/ (#{length(godot)} files)", else: ""}")
+      :ok
+    end
+  end
+
+  # One card per archive: the card that links resolve/main/<archive> holds its size label and hash.
+  defp cards(html, o, files) do
+    [head | rest] = String.split(html, ~s(<div class="card">))
+
+    Enum.reduce_while(files, {:ok, rest}, fn f, {:ok, cs} ->
+      case Enum.find_index(cs, &String.contains?(&1, "/resolve/main/#{f}")) do
+        nil ->
+          {:cont, {:ok, cs}}
+
+        i ->
+          with {:ok, h} <- sha256(Path.join(o, f)),
+               {:ok, %{size: n}} <- File.stat(Path.join(o, f)) do
+            c = cs |> Enum.at(i)
+                |> String.replace(~r/SHA-256 [0-9a-f]{64}/, "SHA-256 " <> h, global: false)
+                |> String.replace(~r/\d+(\.\d)? [MG]B/, size_label(n), global: false)
+            {:cont, {:ok, List.replace_at(cs, i, c)}}
+          else
+            e -> {:halt, e}
+          end
+      end
+    end)
+    |> case do
+      {:ok, cs} -> {:ok, Enum.join([head | cs], ~s(<div class="card">))}
+      e -> e
+    end
+  end
+
+  defp size_label(n) when n >= 1_000_000_000, do: :erlang.float_to_binary(n / 1.0e9, decimals: 1) <> " GB"
+  defp size_label(n), do: "#{round(n / 1.0e6)} MB"
+
+  defp copy_web(web, dst) do
+    files = ~w(index.html index.js index.wasm index.side.wasm index.pck index.png index.audio.worklet.js
+               index.audio.position.worklet.js libgodot_riscv.web.template_release.double.wasm32.wasm)
+
+    with :ok <- File.mkdir_p(dst) do
+      Enum.reduce_while(files, {:ok, []}, fn f, {:ok, acc} ->
+        case File.cp(Path.join(web, f), Path.join(dst, f)) do
+          :ok -> {:cont, {:ok, acc ++ ["godot/" <> f]}}
+          {:error, r} -> {:halt, {:error, "web export lacks #{f}: #{r}"}}
+        end
+      end)
+    end
+  end
 
   # Godot pck (format 3 or 4, unencrypted): %{path => bytes}.
   def pck_files(<<0x43504447::little-32, version::little-32, _::binary-12, flags::little-32,

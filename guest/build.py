@@ -44,7 +44,10 @@ if mm_sets:
     for d in mm_sets:
         for c in sorted(p for p in pathlib.Path(d).iterdir() if p.is_dir()):
             shutil.copy(c / 'transforms.f32', mm / (c.name + '.f32'))
-            keys.append(c.name)
+            if (c / 'phase.f32').exists():
+                shutil.copy(c / 'phase.f32', mm / (c.name + '.phase.f32'))
+            # Same clips.tsv as tools/package_desktop.sh: "<key>\tloop" for a clip cut as a loop.
+            keys.append(c.name + ('\tloop' if (c / 'loop.txt').exists() else ''))
             first = first or c
     (mm / 'clips.tsv').write_text(''.join(k + '\n' for k in keys))
     (mm / 'skeleton.txt').write_text(''.join((first / 'skeleton.txt').read_text().splitlines(True)[3:]))

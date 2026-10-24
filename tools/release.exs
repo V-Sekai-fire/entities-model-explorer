@@ -559,7 +559,11 @@ defmodule Release do
   def step_publish(ctx) do
     gate = Path.join(ctx.root, "3-interactor/skintokens-qlora/tools/space_gate.py")
 
-    with {:ok, tok} <- hf_token() do
+    # A gate without REVISION would put a dev release on main.
+    with {:ok, g} <- File.read(gate),
+         true <- ctx.publish == "main" or String.contains?(g, "REVISION") ||
+                   {:error, "#{gate} cannot commit to a branch (no REVISION): update the checkout"},
+         {:ok, tok} <- hf_token() do
       Enum.reduce_while(@viewers, :ok, fn v, _ ->
         o = Path.join([ctx.dir, "pck", v.key])
         files = archives(v) ++ ~w(SHA256SUMS LICENSE.md NOTICE CITATION.cff)

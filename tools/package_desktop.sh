@@ -2,15 +2,18 @@
 # Build the desktop viewer packages with the auto-rig and its weights.
 #
 #   tools/package_desktop.sh pck <out dir>            export skintokens-viewer.pck from HEAD
-#   tools/package_desktop.sh package <out dir> <w> [skintokens|kimodo-motion]
+#   tools/package_desktop.sh package <out dir> <w> [skintokens|kimodo-motion|walk-mode]
 #                                                     lay out and archive the three packages
 #                                                     in <out dir>/<viewer>/ with SHA256SUMS
 #
 # One pck, two viewers. Each feature is on when its weights are in the package's w folder:
 #   skintokens     skintokens-viewer, the rig weights (R auto-rigs), no Kimodo (the default)
 #   kimodo-motion  kimodo-motion-viewer, the Kimodo weights (the Motion list), no rig weights
+#   walk-mode      walk-mode-viewer, no weights (M walks a rigged model; <w> is unused)
 #
 # Inputs (environment):
+#   GODOT    optional: the double editor that exports the pck (default
+#            $ENGINE/godot.macos.editor.double.arm64; godot.linuxbsd.editor.double.x86_64 on Linux)
 #   ENGINE   dir with godot.macos.editor.double.arm64 and the three template_release runtimes
 #            from V-Sekai-fire/service-godot-build v20260930-double.1, plus LICENSE-model-explorer.txt
 #   SANDBOX  dir with the godot-sandbox native libraries (CI artifacts of the add-on's main),
@@ -102,7 +105,7 @@ E
   done
   sed -n '4,$p' "$first/skeleton.txt" > "$src/motion/mm/skeleton.txt"
   cp "$first/parents.txt" "$src/motion/mm/parents.txt"
-  G="$ENGINE/godot.macos.editor.double.arm64"
+  G="${GODOT:-$ENGINE/godot.macos.editor.double.arm64}"
   "$G" --headless --path "$src" --import > "$out/import.log" 2>&1 || true
   # lilToon (thirdparty/lilToon) as asset package members, carried by every exported package.
   "$G" --headless --path "$src" --script tools/liltoon_pack.gd > "$out/liltoon_pack.log" 2>&1 \
@@ -121,6 +124,7 @@ w=$3 variant=${4:-skintokens}
 case $variant in
   skintokens) app=skintokens-viewer weights="mesh-encoder.gguf skin-vae.gguf tokenrig.gguf" ;;
   kimodo-motion) app=kimodo-motion-viewer weights="Kimodo-SOMA-RP-v1.1-gguf/kimodo-soma-rp-v1.1.gguf" ;;
+  walk-mode) app=walk-mode-viewer weights="" ;;
   *) echo "unknown viewer $variant"; exit 2 ;;
 esac
 for f in $weights; do
@@ -131,7 +135,8 @@ for f in LICENSE.md NOTICE CITATION.cff; do
 done
 lay() { # <os> <runtime> <exe suffix> <library>
   d="$out/$variant/$1/$app"
-  rm -rf "$out/$variant/$1" && mkdir -p "$d/w"
+  rm -rf "$out/$variant/$1" && mkdir -p "$d"
+  [ -z "$weights" ] || mkdir -p "$d/w"
   cp "$ENGINE/$2" "$d/$app$3" && chmod +x "$d/$app$3"
   # Godot loads the pck that has the name of the program.
   cp "$out/skintokens-viewer.pck" "$d/$app.pck"
@@ -139,7 +144,8 @@ lay() { # <os> <runtime> <exe suffix> <library>
   cp "$ENGINE/LICENSE-model-explorer.txt" "$d/"
   cp "$NOTICES/LICENSE.md" "$NOTICES/NOTICE" "$NOTICES/CITATION.cff" "$d/"
   for f in $weights; do
-    mkdir -p "$d/w/$(dirname "$f")" && cp "$w/$f" "$d/w/$f"
+    # A hard link where it can (same file system): three layouts of the 1.25 GB weights fit.
+    mkdir -p "$d/w/$(dirname "$f")" && { ln "$w/$f" "$d/w/$f" 2>/dev/null || cp "$w/$f" "$d/w/$f"; }
   done
   if [ -n "${BINTR:-}" ]; then
     mkdir -p "$d/bintr" && cp "$BINTR/$1"/bintr-* "$d/bintr/"

@@ -2,6 +2,7 @@
 
     python3 tools/licences/licgen.py <out dir>      -> <out>/skintokens/{LICENSE.md,NOTICE,CITATION.cff}
                                         <out>/kimodo-motion/{...}
+                                        <out>/walk-mode/{...} (no weights)
 
 Both viewers ship the same pck contents (skintokens.elf, motion.elf, usd.elf, headfit.elf, mm.elf, liltoon.tar
 and its walk-mode clips, mujoco.elf and the obstacle course, the 18 prompt
@@ -33,6 +34,12 @@ VIEWERS = {
         "title": "Kimodo motion viewer (desktop downloads)",
         "repo": "chibifire/interactor-kimodo-motion-viewer",
         "weights": "kimodo",
+    },
+    "walk-mode": {
+        "app": "walk-mode-viewer",
+        "title": "Walk mode viewer (desktop downloads)",
+        "repo": "chibifire/interactor-walk-mode-viewer",
+        "weights": "none",
     },
 }
 

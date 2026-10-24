@@ -347,7 +347,11 @@ func start() -> void:
 func _vrm1_first() -> void:
 	say("Move: the model is VRM 0.x, so it is saved as VRM 1.0 first.")
 	var out := OS.get_user_data_dir().path_join(source.get_file().get_basename() + ".vrm1.vrm")
-	var why: String = auto_rig.save_vrm1(source, out)
+	# GLTFDocument writes binary glTF for a .glb name only: write that, then name it .vrm.
+	var glb := out.get_basename() + ".glb"
+	var why: String = auto_rig.save_vrm1(source, glb)
+	if why == "" and DirAccess.rename_absolute(glb, out) != OK:
+		why = "cannot rename %s" % glb
 	if why != "":
 		_fail("cannot save the model as VRM 1.0: %s" % why)
 		if _test:
@@ -460,13 +464,61 @@ func _make_moves() -> String:
 	var soma := _soma()
 	var dir := OS.get_user_data_dir().path_join("moves")
 	DirAccess.make_dir_recursive_absolute(dir)
-	var cur := source
 	var out := dir.path_join(source.get_file().get_basename() + ".moves.glb")
 	# One guest for every clip: its arena is the whole memory cost, so it stays the same for 72
 	# clips as for one. (A guest per clip, freed at the end of a frame, kept all 72 arenas alive.)
 	var rig: Node = _helper._sandbox(RIG_ELF, "skintokens_motion_start")
 	if rig == null:
 		return _fail("skintokens.elf has no motion step")
+	var glb: PackedByteArray
+	if rig.has_function("skintokens_motions_add"):
+		glb = await _all_clips_at_once(rig, keys, soma, t0)
+	else:
+		glb = await _clip_by_clip(rig, keys, soma, t0, out)
+	_helper._free(rig)
+	if glb.is_empty():
+		return ""
+	var f := FileAccess.open(out, FileAccess.WRITE)
+	if f == null:
+		return _fail("cannot save %s" % out)
+	f.store_buffer(glb)
+	f.close()
+	print("MOVE-MADE %s clips=%d ms=%d" % [out, keys.size(), Time.get_ticks_msec() - t0])
+	say("")
+	return out
+
+
+# Every clip in one job: the rig file is read and the moves file written once, so the guest holds
+# the rig, the clips and one result. Adding clip by clip rewrote a file that grew with each clip.
+func _all_clips_at_once(
+	rig: Node, keys: PackedStringArray, soma: Dictionary, t0: int
+) -> PackedByteArray:
+	var label := "Move: putting %d clips on the rig" % keys.size()
+	say(label)
+	rig.vmcall("skintokens_motions_begin", soma.names, soma.parents, 30.0)
+	for k in keys:
+		var xf := FileAccess.get_file_as_bytes(DIR.path_join(k + ".f32")).to_float32_array()
+		var added := str(rig.vmcall("skintokens_motions_add", PREFIX + k, xf))
+		if not added.begins_with("OK"):
+			_fail(added)
+			return PackedByteArray()
+	var started := str(rig.vmcall("skintokens_motions_start", source))
+	if not started.begins_with("STARTED"):
+		_fail(started)
+		return PackedByteArray()
+	if not await _helper._drive(rig, "skintokens_pump", label, t0):
+		return PackedByteArray()
+	var glb := _result(rig)
+	_helper._close_files()
+	return glb
+
+
+# An older skintokens.elf without the one-job step: one clip per job, each on the file so far.
+func _clip_by_clip(
+	rig: Node, keys: PackedStringArray, soma: Dictionary, t0: int, out: String
+) -> PackedByteArray:
+	var cur := source
+	var glb := PackedByteArray()
 	for i in keys.size():
 		var label := "Move: putting %s on the rig (%d of %d)" % [keys[i], i + 1, keys.size()]
 		say(label)
@@ -484,33 +536,36 @@ func _make_moves() -> String:
 			)
 		)
 		if not started.begins_with("STARTED"):
-			_helper._free(rig)
-			return _fail(started)
+			_fail(started)
+			return PackedByteArray()
 		if not await _helper._drive(rig, "skintokens_pump", label, t0):
-			_helper._free(rig)
-			return ""
-		var glb := PackedByteArray()
-		var size := int(rig.vmcall("skintokens_result_size"))
-		while glb.size() < size:
-			var chunk: PackedByteArray = rig.vmcall(
-				"skintokens_result_chunk", glb.size(), min(size - glb.size(), 8 << 20)
-			)
-			if chunk.is_empty():
-				_helper._free(rig)
-				return _fail("the result did not read back")
-			glb.append_array(chunk)
+			return PackedByteArray()
+		glb = _result(rig)
 		_helper._close_files()
+		if glb.is_empty():
+			return glb
 		var f := FileAccess.open(out, FileAccess.WRITE)
 		if f == null:
-			_helper._free(rig)
-			return _fail("cannot save %s" % out)
+			_fail("cannot save %s" % out)
+			return PackedByteArray()
 		f.store_buffer(glb)
 		f.close()
 		cur = out
-	_helper._free(rig)
-	print("MOVE-MADE %s clips=%d ms=%d" % [out, keys.size(), Time.get_ticks_msec() - t0])
-	say("")
-	return out
+	return glb
+
+
+func _result(rig: Node) -> PackedByteArray:
+	var glb := PackedByteArray()
+	var size := int(rig.vmcall("skintokens_result_size"))
+	while glb.size() < size:
+		var chunk: PackedByteArray = rig.vmcall(
+			"skintokens_result_chunk", glb.size(), min(size - glb.size(), 8 << 20)
+		)
+		if chunk.is_empty():
+			_fail("the result did not read back")
+			return PackedByteArray()
+		glb.append_array(chunk)
+	return glb
 
 
 func _fail(why: String) -> String:

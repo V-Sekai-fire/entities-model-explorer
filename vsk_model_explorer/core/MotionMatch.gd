@@ -318,6 +318,11 @@ func start() -> void:
 		if not AutoRig.has_skin(source):
 			await _rig_first()
 			return
+		# The rig program reads VRM 1.0 Humanoid roles only (VRMC_vrm, or KHR_character_skeleton_mapping's
+		# vrm1_humanoid set). A VRM 0.x is saved as VRM 1.0 first; the walk uses that file.
+		if source.get_extension().to_lower() == "vrm" and auto_rig != null and not auto_rig.is_vrm1(source):
+			_vrm1_first()
+			return
 		busy = true
 		var out := await _make_moves()
 		busy = false
@@ -331,6 +336,22 @@ func start() -> void:
 	if not _bake():
 		return
 	_begin()
+
+
+# Save the open VRM 0.x as VRM 1.0 (godot-vrm turns it to face +Z) in the user folder, open that
+# file, and start() runs again on it. The moves file is then named after <name>.vrm1.
+func _vrm1_first() -> void:
+	say("Move: the model is VRM 0.x, so it is saved as VRM 1.0 first.")
+	var out := OS.get_user_data_dir().path_join(source.get_file().get_basename() + ".vrm1.vrm")
+	var why: String = auto_rig.save_vrm1(source, out)
+	if why != "":
+		_fail("cannot save the model as VRM 1.0: %s" % why)
+		if _test:
+			get_tree().quit(1)
+		return
+	print("MOVE-VRM1 %s" % out)
+	_walk_after_rig = true
+	moves_made.emit(out)
 
 
 # The open model has no skin, so skintokens.elf cannot put the clips on it. On the desktop with

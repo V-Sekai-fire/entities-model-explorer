@@ -691,7 +691,8 @@ defmodule Release do
     git -C "$P" fetch -q origin main
     CS=$(git -C "$P" rev-parse FETCH_HEAD)
     [ -d "$C/compiler" ] || git -C "$P" worktree add -q --detach "$C/compiler" "$CS"
-    (cd "$C/compiler" && git checkout -q --detach "$CS" && git submodule update -q --init --recursive \
+    # ext/ is vendored as subtrees (no submodules to fetch).
+    (cd "$C/compiler" && git checkout -q --detach "$CS" \
       && ~/.pixi/bin/pixi run configure > "$D/compiler.log" 2>&1 \
       && ~/.pixi/bin/pixi run cmake --build build --target gdscript_to_riscv >> "$D/compiler.log" 2>&1) \
       || { tail -20 "$D/compiler.log"; exit 1; }
@@ -932,9 +933,11 @@ defmodule Release do
   defp gh_token(org) do
     helper = System.find_executable("bao-mint-github") || Path.expand("~/.local/bin/bao-mint-github")
 
+    # bao-mint-github prints one line per OpenBao host it tried ({:error, ...} for one that is
+    # down) before the token, so take the word that is a GitHub token, not the first word.
     with true <- File.exists?(helper) || {:error, "no bao-mint-github on this machine"},
          {out, 0} <- System.cmd("sh", ["-c", "\"$0\" \"$1\" 2>/dev/null", helper, org]),
-         [tok | _] <- String.split(out) do
+         tok when is_binary(tok) <- out |> String.split() |> Enum.find(&String.match?(&1, ~r/^gh[sopu]_/)) do
       {:ok, tok}
     else
       {:error, _} = e -> e

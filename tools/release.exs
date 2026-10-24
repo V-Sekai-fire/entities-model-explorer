@@ -7,6 +7,8 @@
 #   pixi run release --publish none           build and test only
 #   pixi run release --ref <model-explorer ref>   default origin/main
 #   pixi run release --resume <dir>           continue a stopped run; finished steps are skipped
+#                                             (new runs go under $RELEASE_ROOT, default D: on the
+#                                             WSL desk, else <root>/.release)
 #   pixi run release --until <step>           stop after a step (see @steps)
 #   pixi run release --branch <repo>=<branch> take that guest's ELF from its newest green run on
 #                                             <branch> instead of main (a release candidate);
@@ -75,7 +77,7 @@ defmodule Release do
          :ok <- if(publish in ~w(none dev main), do: :ok, else: {:error, "--publish is none, dev or main"}),
          until = opts[:until] || List.last(@steps),
          :ok <- if(until in @steps, do: :ok, else: {:error, "--until is one of #{Enum.join(@steps, " ")}"}),
-         dir = opts[:resume] || Path.join([root, ".release", stamp()]),
+         dir = opts[:resume] || Path.join(release_root(root), stamp()),
          :ok <- File.mkdir_p(Path.join(dir, ".done")) do
       ctx = %{root: root, dir: dir, publish: publish, ref: opts[:ref] || "origin/main",
               mac: System.get_env("RELEASE_MAC") || "ernest.lee@100.64.202.51", id: Path.basename(dir),
@@ -110,6 +112,16 @@ defmodule Release do
     |> case do
       nil -> {:error, "no .repo above #{start}: run from the smoke-water root"}
       root -> {:ok, root}
+    end
+  end
+
+  # A release folder holds about 8 GB (three packages per viewer plus the weights). RELEASE_ROOT
+  # picks where; on the WSL desk the default is D:, which has the room the WSL disk lacks.
+  defp release_root(root) do
+    cond do
+      r = System.get_env("RELEASE_ROOT") -> r
+      File.dir?("/mnt/d") -> "/mnt/d/smoke-water-release"
+      true -> Path.join(root, ".release")
     end
   end
 

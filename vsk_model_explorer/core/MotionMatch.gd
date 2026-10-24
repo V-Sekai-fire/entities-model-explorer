@@ -437,12 +437,14 @@ func _make_moves() -> String:
 	DirAccess.make_dir_recursive_absolute(dir)
 	var cur := source
 	var out := dir.path_join(source.get_file().get_basename() + ".moves.glb")
+	# One guest for every clip: its arena is the whole memory cost, so it stays the same for 72
+	# clips as for one. (A guest per clip, freed at the end of a frame, kept all 72 arenas alive.)
+	var rig: Node = _helper._sandbox(RIG_ELF, "skintokens_motion_start")
+	if rig == null:
+		return _fail("skintokens.elf has no motion step")
 	for i in keys.size():
 		var label := "Move: putting %s on the rig (%d of %d)" % [keys[i], i + 1, keys.size()]
 		say(label)
-		var rig: Node = _helper._sandbox(RIG_ELF, "skintokens_motion_start")
-		if rig == null:
-			return _fail("skintokens.elf has no motion step")
 		var xf := FileAccess.get_file_as_bytes(DIR.path_join(keys[i] + ".f32")).to_float32_array()
 		var started := str(
 			rig.vmcall(
@@ -460,6 +462,7 @@ func _make_moves() -> String:
 			_helper._free(rig)
 			return _fail(started)
 		if not await _helper._drive(rig, "skintokens_pump", label, t0):
+			_helper._free(rig)
 			return ""
 		var glb := PackedByteArray()
 		var size := int(rig.vmcall("skintokens_result_size"))
@@ -471,14 +474,15 @@ func _make_moves() -> String:
 				_helper._free(rig)
 				return _fail("the result did not read back")
 			glb.append_array(chunk)
-		_helper._free(rig)
 		_helper._close_files()
 		var f := FileAccess.open(out, FileAccess.WRITE)
 		if f == null:
+			_helper._free(rig)
 			return _fail("cannot save %s" % out)
 		f.store_buffer(glb)
 		f.close()
 		cur = out
+	_helper._free(rig)
 	print("MOVE-MADE %s clips=%d ms=%d" % [out, keys.size(), Time.get_ticks_msec() - t0])
 	say("")
 	return out

@@ -211,11 +211,10 @@ func _sandbox(elf: String, needs: String) -> Node:
 func _free(sb: Node) -> void:
 	if sb:
 		remove_child(sb)
-		# On the web, free the arena now: a queued free kept two arenas alive at once.
-		if OS.has_feature("web"):
-			sb.free()
-		else:
-			sb.queue_free()
+		# Free the arena now, on every platform. A queued free waits for the end of the frame, and a
+		# CPU-only job (the moves: 72 clips) never yields one, so every 2 GiB arena stayed alive at
+		# once: 140 GB private memory on Windows, which commits each arena.
+		sb.free()
 
 
 # Runs the started job on `pump` to the end, answering its file reads and weight uploads.

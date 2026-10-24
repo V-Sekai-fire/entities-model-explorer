@@ -144,7 +144,8 @@ lay() { # <os> <runtime> <exe suffix> <library>
   cp "$ENGINE/LICENSE-model-explorer.txt" "$d/"
   cp "$NOTICES/LICENSE.md" "$NOTICES/NOTICE" "$NOTICES/CITATION.cff" "$d/"
   for f in $weights; do
-    mkdir -p "$d/w/$(dirname "$f")" && cp "$w/$f" "$d/w/$f"
+    # A hard link where it can (same file system): three layouts of the 1.25 GB weights fit.
+    mkdir -p "$d/w/$(dirname "$f")" && { ln "$w/$f" "$d/w/$f" 2>/dev/null || cp "$w/$f" "$d/w/$f"; }
   done
   if [ -n "${BINTR:-}" ]; then
     mkdir -p "$d/bintr" && cp "$BINTR/$1"/bintr-* "$d/bintr/"

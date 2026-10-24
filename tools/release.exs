@@ -330,7 +330,14 @@ defmodule Release do
              {"NOTICES", Path.join([ctx.dir, "notices", v.key])}]
 
       with {:ok, log} <- cap("sh", [Path.join(ctx.dir, "model-explorer/tools/package_desktop.sh"), "package", out, Path.join(ctx.dir, "w"), v.key], env),
-           true <- String.contains?(log, "PACKAGE-OK") || {:error, "#{v.key}: no PACKAGE-OK"} do
+           true <- String.contains?(log, "PACKAGE-OK") || {:error, "#{v.key}: no PACKAGE-OK"},
+           # The archives are the release; the per-OS folders they were made from are not kept.
+           :ok <- Enum.reduce_while(~w(macos windows linux), :ok, fn os, _ ->
+             case File.rm_rf(Path.join([out, v.key, os])) do
+               {:ok, _} -> {:cont, :ok}
+               {:error, r, f} -> {:halt, {:error, "cannot remove #{f}: #{r}"}}
+             end
+           end) do
         {:cont, :ok}
       else
         e -> {:halt, e}
@@ -652,7 +659,7 @@ defmodule Release do
     helper = System.find_executable("bao-mint-github") || Path.expand("~/.local/bin/bao-mint-github")
 
     with true <- File.exists?(helper) || {:error, "no bao-mint-github on this machine"},
-         {out, 0} <- System.cmd(helper, [org]),
+         {out, 0} <- System.cmd("sh", ["-c", "\"$0\" \"$1\" 2>/dev/null", helper, org]),
          [tok | _] <- String.split(out) do
       {:ok, tok}
     else

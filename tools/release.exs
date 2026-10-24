@@ -433,7 +433,11 @@ defmodule Release do
         d = Path.join(base, v.key)
 
         with :ok <- File.mkdir_p(d),
-             {:ok, _} <- cap("unzip", ["-q", Path.join([ctx.dir, "pck", v.key, "#{v.app}-windows-x86_64.zip"]), "-d", d]),
+             # Windows' own tar reads the zip over \\wsl.localhost and writes C: natively: seconds,
+             # where unzip through /mnt/c took minutes for the weights.
+             {:ok, zipw} <- cap("wslpath", ["-w", Path.join([ctx.dir, "pck", v.key, "#{v.app}-windows-x86_64.zip"])]),
+             {:ok, dw} <- cap("wslpath", ["-w", d]),
+             {:ok, _} <- cap("tar.exe", ["-xf", String.trim(zipw), "-C", String.trim(dw)], [], "/mnt/c"),
              exe = Path.join(d, v.app <> ".exe"),
              {:ok, _} <- win_run(exe, ["--features-quit"], "VIEWER-FEATURES rig=#{v.rig}", Path.join(d, "features.log")),
              {:ok, _} <- (if v.rig, do: win_run(exe, [Path.join(base, "giraffe.glb"), "--auto-rig-quit"], "AUTO-RIG-OK", Path.join(d, "rig.log")), else: {:ok, :skipped}),

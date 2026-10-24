@@ -320,7 +320,11 @@ func start() -> void:
 			return
 		# The rig program reads VRM 1.0 Humanoid roles only (VRMC_vrm, or KHR_character_skeleton_mapping's
 		# vrm1_humanoid set). A VRM 0.x is saved as VRM 1.0 first; the walk uses that file.
-		if source.get_extension().to_lower() == "vrm" and auto_rig != null and not auto_rig.is_vrm1(source):
+		if (
+			source.get_extension().to_lower() == "vrm"
+			and auto_rig != null
+			and not auto_rig.is_vrm1(source)
+		):
 			_vrm1_first()
 			return
 		busy = true

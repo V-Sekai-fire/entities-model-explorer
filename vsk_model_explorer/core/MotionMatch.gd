@@ -471,7 +471,7 @@ func _make_moves() -> String:
 	if rig == null:
 		return _fail("skintokens.elf has no motion step")
 	var glb: PackedByteArray
-	if rig.has_function("skintokens_motions_start"):
+	if rig.has_function("skintokens_motions_add"):
 		glb = await _all_clips_at_once(rig, keys, soma, t0)
 	else:
 		glb = await _clip_by_clip(rig, keys, soma, t0, out)
@@ -495,27 +495,14 @@ func _all_clips_at_once(
 ) -> PackedByteArray:
 	var label := "Move: putting %d clips on the rig" % keys.size()
 	say(label)
-	var all := PackedFloat32Array()
-	var frames := PackedInt32Array()
-	var names := PackedStringArray()
-	var per_frame: int = (soma.names as String).split("\n", false).size() * 12
+	rig.vmcall("skintokens_motions_begin", soma.names, soma.parents, 30.0)
 	for k in keys:
 		var xf := FileAccess.get_file_as_bytes(DIR.path_join(k + ".f32")).to_float32_array()
-		all.append_array(xf)
-		frames.append(xf.size() / per_frame)
-		names.append(PREFIX + k)
-	var started := str(
-		rig.vmcall(
-			"skintokens_motions_start",
-			source,
-			"\n".join(names),
-			soma.names,
-			soma.parents,
-			all,
-			frames,
-			30.0
-		)
-	)
+		var added := str(rig.vmcall("skintokens_motions_add", PREFIX + k, xf))
+		if not added.begins_with("OK"):
+			_fail(added)
+			return PackedByteArray()
+	var started := str(rig.vmcall("skintokens_motions_start", source))
 	if not started.begins_with("STARTED"):
 		_fail(started)
 		return PackedByteArray()

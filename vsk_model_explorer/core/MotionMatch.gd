@@ -318,6 +318,15 @@ func start() -> void:
 		if not AutoRig.has_skin(source):
 			await _rig_first()
 			return
+		# The rig program reads VRM 1.0 Humanoid roles only (VRMC_vrm, or KHR_character_skeleton_mapping's
+		# vrm1_humanoid set). A VRM 0.x is saved as VRM 1.0 first; the walk uses that file.
+		if (
+			source.get_extension().to_lower() == "vrm"
+			and auto_rig != null
+			and not auto_rig.is_vrm1(source)
+		):
+			_vrm1_first()
+			return
 		busy = true
 		var out := await _make_moves()
 		busy = false
@@ -331,6 +340,22 @@ func start() -> void:
 	if not _bake():
 		return
 	_begin()
+
+
+# Save the open VRM 0.x as VRM 1.0 (godot-vrm turns it to face +Z) in the user folder, open that
+# file, and start() runs again on it. The moves file is then named after <name>.vrm1.
+func _vrm1_first() -> void:
+	say("Move: the model is VRM 0.x, so it is saved as VRM 1.0 first.")
+	var out := OS.get_user_data_dir().path_join(source.get_file().get_basename() + ".vrm1.vrm")
+	var why: String = auto_rig.save_vrm1(source, out)
+	if why != "":
+		_fail("cannot save the model as VRM 1.0: %s" % why)
+		if _test:
+			get_tree().quit(1)
+		return
+	print("MOVE-VRM1 %s" % out)
+	_walk_after_rig = true
+	moves_made.emit(out)
 
 
 # The open model has no skin, so skintokens.elf cannot put the clips on it. On the desktop with
@@ -437,12 +462,14 @@ func _make_moves() -> String:
 	DirAccess.make_dir_recursive_absolute(dir)
 	var cur := source
 	var out := dir.path_join(source.get_file().get_basename() + ".moves.glb")
+	# One guest for every clip: its arena is the whole memory cost, so it stays the same for 72
+	# clips as for one. (A guest per clip, freed at the end of a frame, kept all 72 arenas alive.)
+	var rig: Node = _helper._sandbox(RIG_ELF, "skintokens_motion_start")
+	if rig == null:
+		return _fail("skintokens.elf has no motion step")
 	for i in keys.size():
 		var label := "Move: putting %s on the rig (%d of %d)" % [keys[i], i + 1, keys.size()]
 		say(label)
-		var rig: Node = _helper._sandbox(RIG_ELF, "skintokens_motion_start")
-		if rig == null:
-			return _fail("skintokens.elf has no motion step")
 		var xf := FileAccess.get_file_as_bytes(DIR.path_join(keys[i] + ".f32")).to_float32_array()
 		var started := str(
 			rig.vmcall(
@@ -460,6 +487,7 @@ func _make_moves() -> String:
 			_helper._free(rig)
 			return _fail(started)
 		if not await _helper._drive(rig, "skintokens_pump", label, t0):
+			_helper._free(rig)
 			return ""
 		var glb := PackedByteArray()
 		var size := int(rig.vmcall("skintokens_result_size"))
@@ -471,14 +499,15 @@ func _make_moves() -> String:
 				_helper._free(rig)
 				return _fail("the result did not read back")
 			glb.append_array(chunk)
-		_helper._free(rig)
 		_helper._close_files()
 		var f := FileAccess.open(out, FileAccess.WRITE)
 		if f == null:
+			_helper._free(rig)
 			return _fail("cannot save %s" % out)
 		f.store_buffer(glb)
 		f.close()
 		cur = out
+	_helper._free(rig)
 	print("MOVE-MADE %s clips=%d ms=%d" % [out, keys.size(), Time.get_ticks_msec() - t0])
 	say("")
 	return out

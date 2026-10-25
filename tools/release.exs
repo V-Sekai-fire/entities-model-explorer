@@ -969,7 +969,7 @@ defmodule Release do
 
   defp stage_web(ctx, t) do
     src = Path.join([ctx.dir, "web", "out"])
-    if File.dir?(src), do: (with {:ok, _} <- File.cp_r(src, Path.join(t, "godot")) |> cp_ok(), do: :ok), else: :ok
+    if File.exists?(Path.join(ctx.dir, ".done/web")) and File.dir?(src), do: (with {:ok, _} <- File.cp_r(src, Path.join(t, "godot")) |> cp_ok(), do: :ok), else: :ok
   end
 
   defp copy_all(names, from, to) do

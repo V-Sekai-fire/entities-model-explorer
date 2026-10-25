@@ -833,9 +833,17 @@ defmodule Release do
   @load_limit_ms 4000
 
   def step_test_load(ctx) do
+    # A viewer that lacks the flag never quits, so it is not run: the source must carry it.
+    gd = Path.join(ctx.dir, "model-explorer/vsk_model_explorer/core/ModelExplorer.gd")
+    flag? = match?({:ok, t} when is_binary(t), File.read(gd)) and String.contains?(File.read!(gd), "--load-time-quit")
+
     rows =
-      Enum.flat_map(@viewers, fn v -> [load_windows(ctx, v), load_mac(ctx, v), load_linux(v)] end) ++
-        [load_web(ctx)]
+      if flag? do
+        Enum.flat_map(@viewers, fn v -> [load_windows(ctx, v), load_mac(ctx, v), load_linux(v)] end) ++
+          [load_web(ctx)]
+      else
+        [{"all viewers", {:error, "#{ctx.ref} predates --load-time-quit, so no viewer was run"}}]
+      end
 
     lines =
       Enum.map(rows, fn

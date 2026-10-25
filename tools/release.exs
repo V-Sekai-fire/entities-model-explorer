@@ -1,54 +1,59 @@
 #!/usr/bin/env elixir
-# Build, test and publish the desktop viewers (SkinTokens viewer and walk-mode viewer) in one run.
+# Build, test and stage the walk-mode viewer (desktop packages and the web viewer) in one run.
 #
 #   pixi run release                          from the smoke-water root (release.exs is linked
-#                                             there by the manifest); publishes to branch dev.
-#                                             No arguments are needed, on the Mac or the WSL desk
-#   pixi run release --publish main           publish to main instead (the Spaces link main)
-#   pixi run release --publish none           build and test only
-#   pixi run release --ref <model-explorer ref>   default origin/main
+#                                             there by the manifest); builds, tests and stages.
+#                                             No arguments are needed; nothing is uploaded
+#   pixi run release --publish dev            upload the staged run to branch dev of the repo
+#   pixi run release --publish main           upload to main instead (the Spaces link main)
+#   pixi run release --desk                   refuses: the Windows desk is blocklisted
+#   pixi run release --ref <model-explorer ref>   default $RELEASE_REF, else origin/main
 #   pixi run release --resume <dir>           continue a stopped run; finished steps are skipped
-#                                             (new runs go under $RELEASE_ROOT, default D: on the
-#                                             WSL desk when it is mounted, else <root>/.release)
+#                                             (new runs go under $RELEASE_ROOT, default <root>/.release)
 #   pixi run release --until <step>           stop after a step (see @steps)
 #   pixi run release --branch <repo>=<branch> take that guest's ELF from its newest green run on
 #                                             <branch> instead of main (a release candidate);
 #                                             repeat for more repos, the source is recorded
 #
-# It runs on the WSL desk; started on the Mac, it copies itself to the desk (RELEASE_DESK, default
-# ssh host `desk`) and runs there. The Windows tests run on the desk, the macOS image is built and
-# tested on the Mac over ssh (RELEASE_MAC, default ernest.lee@100.64.202.51), the Linux test runs
-# in WSLg. Every input comes from a green main CI run, a release, or a pinned checkout, and its
-# source is written to <dir>/SOURCES.txt:
+# It runs on this machine, a Mac (Apple silicon), and nowhere else. The Windows zip is tested under
+# Wine on the Mac GPU (Vulkan through MoltenVK to Metal), the macOS image is built, signed (when the
+# release-signing keychain exists) and tested natively, the Linux tar is checked and reported
+# UNTESTED because no window can run in a container here. The Windows desk and WSL are blocklisted:
+# `--desk` refuses. A run STAGES the walk-mode viewer into ~/release-<id>/walk-mode (SHA256SUMS
+# checked); nothing is uploaded unless `--publish dev|main` is given. Every input comes from a green
+# main CI run, a release, or a pinned checkout, and its source is written to <dir>/SOURCES.txt:
 #   engine     newest *-double.* release of V-Sekai-fire/service-godot-build (SHA256SUMS checked)
 #   sandbox    newest green Builds run on V-Sekai-fire/godot-sandbox main
 #   guests     newest green guest run on main of interactor-skintokens-guest, -motion-guest,
 #              -motion-matching-guest (and its clip data at the same commit), interactor-headfit
 #   mujoco     project/plans/mujoco.double.elf at interactor-mujoco-sandbox-demo origin/main
 #   usd        usd.elf has no CI build: it is carried from the published walk-mode viewer's pck
-#   weights    chibifire/SkinTokens-GGUF-BF16 (its SHA256SUMS checked)
 # Gates, in order (the run stops at the first failure and says which):
-#   each ELF in the exported pck equals its input; Windows, macOS image and Linux start and report
-#   their features; the SkinTokens viewer rigs giraffe.glb (AUTO-RIG-OK); both viewers walk
-#   three-vrm-girl.vrm (VRM 0.x, six skins: MOVE-OK), on Windows below @max_private_mb of private
-#   memory; then the upload gate (space_gate.py: blocked words, licence coverage, live sha256).
+#   each ELF equals the hash written when it was fetched, and a planted corrupt ELF must fail that
+#   check; each ELF in the exported pck equals its input; the Windows zip (Wine), the macOS image and
+#   the Linux tar start and report their features; the walk viewer walks three-vrm-girl.vrm
+#   (VRM 0.x, six skins: MOVE-OK) on Windows (Wine) and macOS; the staged folder passes
+#   `shasum -c`, and a planted tampered copy must fail it.
 # Tokens come from OpenBao (bao-mint-github, bao-hf-token or bao-env) and never reach argv.
 # Functions return {:ok, value} or {:error, reason}; nothing raises.
 
 defmodule Release do
-  @steps ~w(engine sandbox guests weights source notices pck package dmg test_windows test_mac test_linux web test_load publish)
+  @steps ~w(engine sandbox guests weights source notices pck package dmg test_windows test_mac test_linux web test_load stage publish)
   @max_private_mb 8192
+  @win_run_ms 1_800_000
+  @em_x86_64 62
   # The macOS image is signed with this Developer ID (in the Mac's release-signing keychain) and
   # notarized; the test then checks Gatekeeper accepts it.
   @sign_id "Developer ID Application: Ernest Lee (F48WQK5Y2R)"
   @viewers [
-    %{key: "skintokens", app: "skintokens-viewer", name: "SkinTokens Viewer",
-      repo: "chibifire/interactor-skintokens-viewer", space: "chibifire/skintokens-auto-rig", rig: true, mac_zip: true, web: false},
     %{key: "walk-mode", app: "walk-mode-viewer", name: "Walk Mode Viewer",
       repo: "chibifire/interactor-walk-mode-viewer", space: "chibifire/walk-mode", rig: false, mac_zip: false, web: true}
   ]
+  @elfs ~w(skintokens.elf usd.elf motion.elf headfit.elf mm.elf mujoco.elf)
   @weights ~w(mesh-encoder.gguf skin-vae.gguf tokenrig.gguf)
-  @engine_files ~w(godot.linuxbsd.editor.double.x86_64 godot.linuxbsd.template_release.double.x86_64
+  @editor "godot.macos.editor.double.arm64"
+  @wine_version "11.18"
+  @engine_files ~w(godot.macos.editor.double.arm64 godot.linuxbsd.template_release.double.x86_64
                    godot.macos.template_release.double.arm64 godot.windows.template_release.double.x86_64.llvm.exe)
   @guests [
     {"interactor-skintokens-guest", "skintokens-elf-", "skintokens.elf"},
@@ -58,12 +63,12 @@ defmodule Release do
   ]
 
   def main(argv) do
-    result = if :os.type() == {:unix, :darwin}, do: forward(argv), else: run(argv)
+    result =
+      if :os.type() == {:unix, :darwin},
+        do: run(argv),
+        else: {:error, "the release runs on a Mac (Apple silicon) only; the Windows desk and WSL are blocklisted"}
 
     case result do
-      {:ok, :forwarded} ->
-        0
-
       {:ok, dir} ->
         IO.puts("RELEASE-OK #{dir}")
         0
@@ -79,18 +84,18 @@ defmodule Release do
 
   defp run(argv) do
     {opts, _, bad} =
-      OptionParser.parse(argv, strict: [publish: :string, ref: :string, resume: :string, until: :string, branch: :keep])
+      OptionParser.parse(argv, strict: [desk: :boolean, publish: :string, ref: :string, resume: :string, until: :string, branch: :keep])
 
-    with :ok <- if(bad == [], do: :ok, else: {:error, "unknown options #{inspect(bad)}"}),
+    with :ok <- if(opts[:desk], do: {:error, "--desk refuses: the Windows desk is blocklisted, the release runs on this Mac"}, else: :ok),
+         :ok <- if(bad == [], do: :ok, else: {:error, "unknown options #{inspect(bad)}"}),
          {:ok, root} <- workspace_root(),
-         publish = opts[:publish] || "dev",
+         publish = opts[:publish] || "none",
          :ok <- if(publish in ~w(none dev main), do: :ok, else: {:error, "--publish is none, dev or main"}),
          until = opts[:until] || List.last(@steps),
          :ok <- if(until in @steps, do: :ok, else: {:error, "--until is one of #{Enum.join(@steps, " ")}"}),
          dir = opts[:resume] || Path.join(release_root(root), stamp()),
          :ok <- File.mkdir_p(Path.join(dir, ".done")) do
-      ctx = %{root: root, dir: dir, publish: publish, ref: opts[:ref] || "origin/main",
-              mac: System.get_env("RELEASE_MAC") || "ernest.lee@100.64.202.51", id: Path.basename(dir),
+      ctx = %{root: root, dir: dir, publish: publish, ref: opts[:ref] || System.get_env("RELEASE_REF") || "origin/main", id: Path.basename(dir),
               branches: Map.new(Keyword.get_values(opts, :branch), &List.to_tuple(String.split(&1, "=", parts: 2)))}
       IO.puts("release #{ctx.id} in #{dir} (publish: #{publish})")
       steps = Enum.take_while(@steps, &(&1 != until)) ++ [until]
@@ -114,31 +119,6 @@ defmodule Release do
     end
   end
 
-  # On the Mac, `pixi run release` hands the run to the WSL desk (RELEASE_DESK, an ssh host whose
-  # login shell is Windows cmd; RELEASE_DESK_ROOT is the desk's client root). The desk runs THIS
-  # copy of the script, so a release always uses the Mac client's release.exs. Output streams back.
-  defp forward(argv) do
-    desk = System.get_env("RELEASE_DESK") || "desk"
-    root = System.get_env("RELEASE_DESK_ROOT") || "~/smoke-water"
-    body = File.read!(__ENV__.file)
-    name = "release-" <> String.slice(hex(:crypto.hash(:sha256, body)), 0, 12) <> ".exs"
-    args = Enum.map_join(argv, " ", &("'" <> String.replace(&1, "'", "'\\''") <> "'"))
-    # The desk's ssh shell is cmd: scp lands in the Windows profile, and cmd expands %USERPROFILE%
-    # in the command line before wsl starts, so bash can find the copy there.
-    sh = "cd #{root} && mkdir -p .release && mv $(wslpath '%USERPROFILE%')/#{name} .release/ && exec ~/.pixi/bin/pixi run -e release elixir .release/#{name} #{args}"
-    tmp = Path.join(System.tmp_dir!(), name)
-
-    IO.puts("release: forwarding to #{desk} (#{root}/.release/#{name})")
-
-    with :ok <- File.write(tmp, body),
-         {:ok, _} <- cap("scp", ["-q", "-o", "BatchMode=yes", tmp, "#{desk}:#{name}"]) do
-      case System.cmd("ssh", ["-o", "BatchMode=yes", desk, "wsl -e bash -lc \"#{sh}\""], into: IO.stream(:stdio, :line), stderr_to_stdout: true) do
-        {_, 0} -> {:ok, :forwarded}
-        {_, n} -> {:error, "the desk run exited #{n}"}
-      end
-    end
-  end
-
   defp workspace_root do
     start = Path.expand(__DIR__)
 
@@ -151,16 +131,9 @@ defmodule Release do
     end
   end
 
-  # A release folder holds about 8 GB (three packages per viewer plus the weights). RELEASE_ROOT
-  # picks where; on the WSL desk the default is D: when D: is mounted (an unplugged drive leaves
-  # an empty /mnt/d that fails with "No such device"), else the client's .release.
-  defp release_root(root) do
-    cond do
-      r = System.get_env("RELEASE_ROOT") -> r
-      File.mkdir_p("/mnt/d/smoke-water-release") == :ok -> "/mnt/d/smoke-water-release"
-      true -> Path.join(root, ".release")
-    end
-  end
+  # A release folder holds about 4 GB (the engine, sandbox libraries, packages and web build).
+  # RELEASE_ROOT picks where; the default is <client>/.release.
+  defp release_root(root), do: System.get_env("RELEASE_ROOT") || Path.join(root, ".release")
 
   defp stamp, do: Calendar.strftime(DateTime.utc_now(), "%Y%m%d-%H%M")
 
@@ -176,7 +149,7 @@ defmodule Release do
          :ok <- File.mkdir_p(d),
          pats = Enum.flat_map(["SHA256SUMS" | @engine_files], &["-p", &1]),
          {:ok, _} <- cap("gh", ["release", "download", tag, "-R", "V-Sekai-fire/service-godot-build", "-D", d, "--clobber" | pats], gh_env(tok)),
-         {:ok, _} <- cap("sha256sum", ["-c", "SHA256SUMS", "--ignore-missing", "--strict"], [], d),
+         :ok <- check_sums(d, @engine_files),
          :ok <- Enum.reduce_while(@engine_files, :ok, fn f, _ -> chmod_x(Path.join(d, f)) end),
          {:ok, _} <- File.copy(Path.join(ctx.root, "4-entities/model-explorer/LICENSE"), Path.join(d, "LICENSE-model-explorer.txt")) do
       source(ctx, "engine V-Sekai-fire/service-godot-build #{tag}")
@@ -218,7 +191,7 @@ defmodule Release do
          :ok <- mujoco(ctx, d),
          :ok <- usd_from_published(ctx, d),
          :ok <- mm_data(ctx, d) do
-      :ok
+      write_sums(d, @elfs)
     end
   end
 
@@ -289,6 +262,10 @@ defmodule Release do
   end
 
   def step_weights(ctx) do
+    if Enum.any?(@viewers, & &1.rig), do: weights(ctx), else: (IO.puts("  no viewer here needs weights"); :ok)
+  end
+
+  defp weights(ctx) do
     d = Path.join(ctx.dir, "w")
     repo = "chibifire/SkinTokens-GGUF-BF16"
 
@@ -345,7 +322,7 @@ defmodule Release do
 
     env = [
       {"ENGINE", Path.join(ctx.dir, "engine")},
-      {"GODOT", Path.join(ctx.dir, "engine/godot.linuxbsd.editor.double.x86_64")},
+      {"GODOT", Path.join(ctx.dir, "engine/" <> @editor)},
       {"SANDBOX", Path.join(ctx.dir, "sandbox")},
       {"ELF", Path.join(elf, "skintokens.elf")},
       {"USD_ELF", Path.join(elf, "usd.elf")},
@@ -356,11 +333,13 @@ defmodule Release do
       {"MM_DATA", Path.join(mmg, "kimodo-locomotion") <> ":" <> Path.join(mmg, "o3de-motionmatching")}
     ]
 
-    with {:ok, log} <- cap("sh", [Path.join(ctx.dir, "model-explorer/tools/package_desktop.sh"), "pck", out], env),
+    with :ok <- check_sums(elf, @elfs),
+         :ok <- control("guest ELFs", elf, @elfs),
+         {:ok, log} <- cap("sh", [Path.join(ctx.dir, "model-explorer/tools/package_desktop.sh"), "pck", out], env),
          true <- String.contains?(log, "PCK-OK") || {:error, "package_desktop.sh pck printed no PCK-OK"},
          {:ok, bin} <- File.read(Path.join(out, "skintokens-viewer.pck")),
          {:ok, files} <- pck_files(bin) do
-      Enum.reduce_while(~w(skintokens.elf usd.elf motion.elf headfit.elf mm.elf mujoco.elf), :ok, fn f, _ ->
+      Enum.reduce_while(@elfs, :ok, fn f, _ ->
         case {File.read(Path.join(elf, f)), Map.fetch(files, f)} do
           {{:ok, b}, {:ok, b}} -> {:cont, :ok}
           {{:ok, _}, {:ok, _}} -> {:halt, {:error, "#{f} in the pck differs from its input"}}
@@ -397,15 +376,16 @@ defmodule Release do
   def step_dmg(ctx) do
     Enum.reduce_while(@viewers, :ok, fn v, _ ->
       o = Path.join([ctx.dir, "pck", v.key])
-      remote = "release-#{ctx.id}/#{v.key}"
+      m = Path.join([ctx.dir, "mac", v.key])
       zip = "#{v.app}-macos-arm64.zip"
       dmg = "#{v.app}-macos-arm64.dmg"
 
-      with {:ok, _} <- mac(ctx, "rm -rf ~/#{remote} && mkdir -p ~/#{remote}"),
-           {:ok, _} <- cap("scp", ["-q", Path.join(o, zip), "#{ctx.mac}:#{remote}/#{zip}"]),
-           {:ok, _} <- mac(ctx, dmg_script(v, remote, zip, dmg, ctx.id)),
-           {:ok, _} <- cap("scp", ["-q", "#{ctx.mac}:#{remote}/#{dmg}", Path.join(o, dmg)]),
+      with :ok <- clean(m),
+           {:ok, _} <- File.copy(Path.join(o, zip), Path.join(m, zip)),
+           {:ok, out} <- mac(ctx, dmg_script(v, m, zip, dmg, ctx.id)),
+           {:ok, _} <- File.copy(Path.join(m, dmg), Path.join(o, dmg)),
            :ok <- sums(o, v) do
+        IO.puts("  macos #{v.key}: #{tail(out)}")
         {:cont, :ok}
       else
         e -> {:halt, e}
@@ -434,10 +414,13 @@ defmodule Release do
     mac ++ ["#{v.app}-windows-x86_64.zip", "#{v.app}-linux-x86_64.tar"]
   end
 
-  defp dmg_script(v, remote, zip, dmg, id) do
+  # The image is signed with the Developer ID and notarized only when this Mac already holds the
+  # release-signing keychain; its password and the notary key come from OpenBao. Without the
+  # keychain the image is built unsigned and signed.txt says so. No credential is ever created here.
+  defp dmg_script(v, dir, zip, dmg, id) do
     """
     set -eu
-    cd ~/#{remote}
+    cd '#{dir}'
     rm -rf unz stage; mkdir unz; (cd unz && unzip -q ../#{zip})
     C="stage/#{v.name}.app/Contents"; mkdir -p "$C/MacOS" "$C/Resources" "$C/Frameworks"
     cp unz/#{v.app} "$C/MacOS/"; [ ! -d unz/w ] || cp -R unz/w "$C/MacOS/w"
@@ -459,71 +442,140 @@ defmodule Release do
     P
     plutil -lint "$C/Info.plist" >/dev/null
     find stage -name '._*' -delete; xattr -cr stage
-    # Developer ID signing, inside out, with the hardened runtime. The key is in its own keychain
-    # (login's keys are locked to an ssh session); its password and the notary key are in OpenBao.
     export PATH=/opt/homebrew/bin:$PATH
-    . ~/.local/bin/bao-login.sh >/dev/null 2>&1
     KC=$HOME/Library/Keychains/release-signing.keychain-db
-    security unlock-keychain -p "$(bao kv get -field=password "secret/agents-own/$BAO_CN/apple-signing-keychain")" "$KC"
-    security list-keychains -d user | grep -q release-signing || security list-keychains -d user -s "$KC" "$HOME/Library/Keychains/login.keychain-db"
     ID="#{@sign_id}"
-    cat > ent.plist <<'P'
+    if [ -f "$KC" ]; then
+      . ~/.local/bin/bao-login.sh >/dev/null 2>&1
+      security unlock-keychain -p "$(bao kv get -field=password "secret/agents-own/$BAO_CN/apple-signing-keychain")" "$KC"
+      security list-keychains -d user | grep -q release-signing || security list-keychains -d user -s "$KC" "$HOME/Library/Keychains/login.keychain-db"
+      cat > ent.plist <<'P'
     <?xml version="1.0" encoding="UTF-8"?>
     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
     <plist version="1.0"><dict><key>com.apple.security.cs.disable-library-validation</key><true/></dict></plist>
     P
-    codesign --force --timestamp --options runtime -s "$ID" "$C/Frameworks/libgodot_riscv.macos.template_release.double.universal.framework"
-    codesign --force --timestamp --options runtime --entitlements ent.plist -s "$ID" "stage/#{v.name}.app"
-    codesign --verify --deep --strict "stage/#{v.name}.app"
+      codesign --force --timestamp --options runtime -s "$ID" "$C/Frameworks/libgodot_riscv.macos.template_release.double.universal.framework"
+      codesign --force --timestamp --options runtime --entitlements ent.plist -s "$ID" "stage/#{v.name}.app"
+      codesign --verify --deep --strict "stage/#{v.name}.app"
+    fi
     ln -s /Applications stage/Applications; cp unz/LICENSE.md unz/NOTICE unz/CITATION.cff stage/
     COPYFILE_DISABLE=1 hdiutil create -quiet -volname "#{v.name}" -srcfolder stage -fs APFS -format ULFO -ov #{dmg}
     hdiutil verify -quiet #{dmg}
-    codesign --force --timestamp -s "$ID" #{dmg}
-    # Notarize with the App Store Connect key; the PEM is rebuilt from its base64 characters (the
-    # stored copy is on one line). The key file lives only for this step.
-    K=$(mktemp -d); trap 'rm -rf "$K"' EXIT
-    bao kv get -format=json "secret/agents-own/$BAO_CN/apple-notary-key" | python3 -c '
+    if [ -f "$KC" ]; then
+      codesign --force --timestamp -s "$ID" #{dmg}
+      K=$(mktemp -d); trap 'rm -rf "$K"' EXIT
+      bao kv get -format=json "secret/agents-own/$BAO_CN/apple-notary-key" | python3 -c '
     import json, re, sys, os
     d = json.load(sys.stdin)["data"]["data"]
     b = re.sub(r"[^A-Za-z0-9+/=]", "", re.sub(r"-----(BEGIN|END) PRIVATE KEY-----", "", d["p8"]))
     k = sys.argv[1]
-    open(os.path.join(k, "key.p8"), "w").write("-----BEGIN PRIVATE KEY-----\\n" + "\\n".join(b[i:i + 64] for i in range(0, len(b), 64)) + "\\n-----END PRIVATE KEY-----\\n")
+    open(os.path.join(k, "key.p8"), "w").write("-----BEGIN PRIVATE KEY-----\\n" + "\\n".join(b[i:i+64] for i in range(0, len(b), 64)) + "\\n-----END PRIVATE KEY-----\\n")
     open(os.path.join(k, "id"), "w").write(d["key_id"].strip()); open(os.path.join(k, "iss"), "w").write(d["issuer_id"].strip())' "$K"
-    xcrun notarytool submit #{dmg} --key "$K/key.p8" --key-id "$(cat "$K/id")" --issuer "$(cat "$K/iss")" --wait --timeout 2h > notary.log 2>&1 || true
-    grep -q "status: Accepted" notary.log || { tail -5 notary.log; exit 1; }
-    xcrun stapler staple -q #{dmg}
-    spctl -a -t open --context context:primary-signature #{dmg}
+      xcrun notarytool submit #{dmg} --key "$K/key.p8" --key-id "$(cat "$K/id")" --issuer "$(cat "$K/iss")" --wait --timeout 2h > notary.log 2>&1 || true
+      grep -q "status: Accepted" notary.log || { tail -5 notary.log; exit 1; }
+      xcrun stapler staple -q #{dmg}
+      spctl -a -t open --context context:primary-signature #{dmg}
+      echo SIGNED > signed.txt
+      echo "DMG-OK signed and notarized"
+    else
+      echo UNSIGNED > signed.txt
+      echo "DMG-OK UNSIGNED (this Mac has no release-signing keychain)"
+    fi
     rm -rf unz stage ent.plist
-    echo DMG-OK
     """
   end
 
+  # ---- Windows under Wine on the Mac GPU ---------------------------------------------------------
+  #
+  # The Windows build runs in a real window: Vulkan through Wine's winevulkan and MoltenVK to Metal.
+  # Headless and the dummy renderer are blocklisted. Wine comes from Gcenx/macOS_Wine_builds (the
+  # asset's sha256 digest is checked) into RELEASE_CACHE; Rosetta must already be installed.
+
+  defp cache_dir, do: System.get_env("RELEASE_CACHE") || Path.expand("~/.cache/smoke-water-release")
+  defp wine_root, do: Path.join(cache_dir(), "wine")
+  defp wine_bin, do: Path.join(wine_root(), "Wine Devel.app/Contents/Resources/wine/bin/wine")
+
+  defp wine_env, do: [{"WINEPREFIX", Path.join(wine_root(), "prefix")}, {"WINEDEBUG", "-all"}, {"WINEDLLOVERRIDES", "mscoree,mshtml="}]
+
+  defp ensure_wine do
+    with {:ok, _} <- cap("arch", ["-x86_64", "/usr/bin/true"]) |> rosetta() do
+      if File.exists?(wine_bin()), do: :ok, else: install_wine()
+    end
+  end
+
+  defp rosetta({:ok, o}), do: {:ok, o}
+  defp rosetta({:error, why}), do: {:error, "Wine needs Rosetta (softwareupdate --install-rosetta): #{why}"}
+
+  defp install_wine do
+    sh = ~S"""
+    set -eu
+    NAME=wine-devel-$1-osx64.tar.xz
+    mkdir -p "$WINE_ROOT"; cd "$WINE_ROOT"
+    LINE=$(curl -sf "https://api.github.com/repos/Gcenx/macOS_Wine_builds/releases/tags/$1" | /usr/bin/python3 -c "
+    import json, sys
+    for a in json.load(sys.stdin)['assets']:
+        if a['name'] == '$NAME':
+            print(a['browser_download_url'], a.get('digest', ''))")
+    [ -n "$LINE" ] || { echo "no asset $NAME in release $1"; exit 1; }
+    URL=${LINE%% *}; SUM=$(echo "$LINE" | awk '{print $2}' | sed 's/^sha256://')
+    [ -n "$SUM" ] || { echo "release gives no digest for $NAME"; exit 1; }
+    curl -sfLO "$URL"
+    echo "$SUM  $NAME" | shasum -a 256 -c
+    tar -xJf "$NAME"; rm -f "$NAME"
+    xattr -dr com.apple.quarantine . 2>/dev/null || true
+    """
+
+    with {:ok, _} <- cap("sh", ["-c", sh, "sh", @wine_version], [{"WINE_ROOT", wine_root()}]), do: :ok
+  end
+
+  # Run a Windows exe under Wine, in its own folder, and return its peak resident memory in MB once
+  # its output holds `want` and names the Apple GPU. /usr/bin/time -l reports the peak.
+  defp win_run(exe, args, want, log) do
+    argv = ["-l", wine_bin(), Path.basename(exe), "--rendering-driver", "vulkan", "--fixed-fps", "60", "--" | args]
+    task = Task.async(fn -> System.cmd("/usr/bin/time", argv, env: wine_env(), stderr_to_stdout: true, cd: Path.dirname(exe)) end)
+
+    case Task.yield(task, @win_run_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {out, _code}} ->
+        File.write(log, out)
+
+        cond do
+          not String.contains?(out, want) -> {:error, "#{Path.basename(log)}: no #{want}; last lines: #{tail(out)}"}
+          not Regex.match?(~r/Using Device #\d+: Apple/, out) -> {:error, "#{Path.basename(log)}: Wine did not draw on the Apple GPU"}
+          true ->
+            case Regex.run(~r/(\d+)\s+maximum resident set size/, out) do
+              [_, b] -> {:ok, div(String.to_integer(b), 1_048_576)}
+              _ -> {:error, "#{Path.basename(log)}: no peak memory line"}
+            end
+        end
+
+      _ ->
+        cap("pkill", ["-f", "wineserver"])
+        {:error, "#{Path.basename(exe)} did not finish in #{div(@win_run_ms, 60_000)} min under Wine"}
+    end
+  end
+
+  defp girl(ctx), do: Path.join(ctx.root, "3-interactor/test-godot-vrm-motion-checker/fire_motion_check/art/three_girl/three-vrm-girl.vrm")
+
+  # The walk test must make the moves, not reuse an earlier run's.
+  defp forget_moves do
+    for f <- Path.wildcard(Path.join(wine_root(), "prefix/drive_c/users/*/AppData/Roaming/Godot/app_userdata/ModelExplorer/**/three-vrm-girl*")), do: File.rm(f)
+    :ok
+  end
+
   def step_test_windows(ctx) do
-    with {:ok, profile} <- cap("cmd.exe", ["/c", "echo %USERPROFILE%"], [], "/mnt/c"),
-         {:ok, wpath} <- cap("wslpath", ["-u", String.trim(profile)]),
-         base = Path.join([String.trim(wpath), "Desktop", "release-test-#{ctx.id}"]),
-         :ok <- clean(base),
-         :ok <- copy_models(ctx, base),
-         {:ok, appdata} <- cap("cmd.exe", ["/c", "echo %APPDATA%"], [], "/mnt/c"),
-         {:ok, moves} <- cap("wslpath", ["-u", String.trim(appdata) <> "\\Godot\\app_userdata\\ModelExplorer"]) do
-      user = String.trim(moves)
-
+    with :ok <- ensure_wine() do
       Enum.reduce_while(@viewers, :ok, fn v, _ ->
-        d = Path.join(base, v.key)
+        d = Path.join([ctx.dir, "test-windows", v.key])
+        exe = Path.join(d, v.app <> ".exe")
 
-        with :ok <- File.mkdir_p(d),
-             # Windows' own tar reads the zip over \\wsl.localhost and writes C: natively: seconds,
-             # where unzip through /mnt/c took minutes for the weights.
-             {:ok, zipw} <- cap("wslpath", ["-w", Path.join([ctx.dir, "pck", v.key, "#{v.app}-windows-x86_64.zip"])]),
-             {:ok, dw} <- cap("wslpath", ["-w", d]),
-             {:ok, _} <- cap("tar.exe", ["-xf", String.trim(zipw), "-C", String.trim(dw)], [], "/mnt/c"),
-             exe = Path.join(d, v.app <> ".exe"),
+        with :ok <- clean(d),
+             {:ok, _} <- cap("unzip", ["-q", Path.join([ctx.dir, "pck", v.key, "#{v.app}-windows-x86_64.zip"]), "-d", d]),
+             {:ok, _} <- File.copy(girl(ctx), Path.join(d, "three-vrm-girl.vrm")),
              {:ok, _} <- win_run(exe, ["--features-quit"], "VIEWER-FEATURES rig=#{v.rig}", Path.join(d, "features.log")),
-             {:ok, _} <- (if v.rig, do: win_run(exe, [Path.join(base, "giraffe.glb"), "--auto-rig-quit"], "AUTO-RIG-OK", Path.join(d, "rig.log")), else: {:ok, :skipped}),
-             :ok <- forget_moves(user),
-             {:ok, peak} <- win_run(exe, [Path.join(base, "three-vrm-girl.vrm"), "--move-quit"], "MOVE-OK", Path.join(d, "walk.log")),
-             true <- peak < @max_private_mb || {:error, "#{v.key} walk on Windows peaked at #{peak} MB private memory (limit #{@max_private_mb})"} do
-          IO.puts("  windows #{v.key}: features, #{if v.rig, do: "rig, ", else: ""}walk OK, peak #{peak} MB private")
+             :ok <- forget_moves(),
+             {:ok, peak} <- win_run(exe, ["three-vrm-girl.vrm", "--move-quit"], "MOVE-OK", Path.join(d, "walk.log")),
+             true <- peak < @max_private_mb || {:error, "#{v.key} walk under Wine peaked at #{peak} MB (limit #{@max_private_mb})"} do
+          IO.puts("  windows (Wine, Apple GPU) #{v.key}: features, walk OK, peak #{peak} MB resident")
           {:cont, :ok}
         else
           e -> {:halt, e}
@@ -532,56 +584,13 @@ defmodule Release do
     end
   end
 
-  # The walk test must make the moves, not reuse an earlier run's.
-  defp forget_moves(user) do
-    for f <- Path.wildcard(Path.join(user, "three-vrm-girl*")) ++ Path.wildcard(Path.join(user, "moves/three-vrm-girl*")), do: File.rm(f)
-    :ok
-  end
-
-  defp copy_models(ctx, base) do
-    with {:ok, _} <- File.copy(Path.join(ctx.root, "3-interactor/skintokens-upstream/examples/giraffe.glb"), Path.join(base, "giraffe.glb")),
-         {:ok, _} <- File.copy(Path.join(ctx.root, "3-interactor/test-godot-vrm-motion-checker/fire_motion_check/art/three_girl/three-vrm-girl.vrm"), Path.join(base, "three-vrm-girl.vrm")) do
-      :ok
-    end
-  end
-
-  # Start a Windows program with PowerShell, sample its private memory every second, and return
-  # the peak in MB once its log holds `want`.
-  defp win_run(exe, args, want, log) do
-    ps = Path.join(Path.dirname(log), "run.ps1")
-    mem = log <> ".mem"
-
-    script = """
-    param([string]$exe, [string]$log, [string]$mem, [string]$rest)
-    $a = @("--") + ($rest -split ';')
-    $p = Start-Process -FilePath $exe -ArgumentList $a -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru -NoNewWindow -WorkingDirectory (Split-Path $exe)
-    $peak = 0
-    while (-not $p.HasExited) { $p.Refresh(); $m = [int]($p.PrivateMemorySize64/1MB); if ($m -gt $peak) { $peak = $m }; Start-Sleep -Milliseconds 1000 }
-    Set-Content $mem $peak
-    """
-
-    w = fn p -> case cap("wslpath", ["-w", p]) do {:ok, s} -> String.trim(s); _ -> p end end
-    wargs = Enum.map(args, fn a -> if String.starts_with?(a, "/"), do: w.(a), else: a end)
-
-    with :ok <- File.write(ps, script),
-         {:ok, _} <- cap("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", w.(ps), "-exe", w.(exe), "-log", w.(log), "-mem", w.(mem), "-rest", Enum.join(wargs, ";")]),
-         {:ok, out} <- File.read(log),
-         err = (case File.read(log <> ".err") do {:ok, e} -> e; _ -> "" end),
-         true <- String.contains?(out <> err, want) || {:error, "#{Path.basename(Path.dirname(log))} #{Path.basename(log)}: no #{want}; last lines: #{tail(out <> err)}"},
-         {:ok, peak} <- File.read(mem) do
-      {:ok, peak |> String.trim() |> String.to_integer()}
-    end
-  end
-
   def step_test_mac(ctx) do
-    giraffe = Path.join(ctx.root, "3-interactor/skintokens-upstream/examples/giraffe.glb")
-    girl = Path.join(ctx.root, "3-interactor/test-godot-vrm-motion-checker/fire_motion_check/art/three_girl/three-vrm-girl.vrm")
-    t = "release-#{ctx.id}/test"
+    t = Path.join(ctx.dir, "test")
 
-    with {:ok, _} <- mac(ctx, "rm -rf ~/#{t} && mkdir -p ~/#{t}"),
-         {:ok, _} <- cap("scp", ["-q", giraffe, girl, "#{ctx.mac}:#{t}/"]) do
+    with :ok <- File.mkdir_p(t),
+         {:ok, _} <- File.copy(girl(ctx), Path.join(t, "three-vrm-girl.vrm")) do
       Enum.reduce_while(@viewers, :ok, fn v, _ ->
-        case mac(ctx, mac_test_script(v, ctx.id, t)) do
+        case mac(ctx, mac_test_script(v, Path.join([ctx.dir, "mac", v.key]), t)) do
           {:ok, out} ->
             if String.contains?(out, "MAC-TEST-OK"),
               do: (IO.puts("  macos #{v.key}: #{tail(out)}"); {:cont, :ok}),
@@ -594,47 +603,46 @@ defmodule Release do
     end
   end
 
-  defp mac_test_script(v, id, t) do
-    rig =
-      if v.rig,
-        do: ~s(open -n -W --stdout "$PWD/rig.log" --stderr "$PWD/rig.log" "$A" --args -- "$T/giraffe.glb" --auto-rig-quit; grep -q AUTO-RIG-OK rig.log || { echo "no AUTO-RIG-OK"; tail -5 rig.log; exit 1; }),
-        else: ""
-
+  defp mac_test_script(v, dir, t) do
     """
     set -eu
-    T=~/#{t}; cd ~/release-#{id}/#{v.key}
+    T='#{t}'; cd '#{dir}'
     rm -rf mnt app; mkdir mnt app
     hdiutil attach -quiet -nobrowse -readonly -mountpoint "$PWD/mnt" #{v.app}-macos-arm64.dmg
     codesign --verify --deep --strict "mnt/#{v.name}.app"
-    spctl -a -t open --context context:primary-signature #{v.app}-macos-arm64.dmg
-    xcrun stapler validate -q #{v.app}-macos-arm64.dmg
+    if grep -q '^SIGNED' signed.txt; then
+      spctl -a -t open --context context:primary-signature #{v.app}-macos-arm64.dmg
+      xcrun stapler validate -q #{v.app}-macos-arm64.dmg
+    fi
     ditto "mnt/#{v.name}.app" "app/#{v.name}.app"; hdiutil detach -quiet mnt
     A="$PWD/app/#{v.name}.app"
-    spctl -a -t exec "$A"
+    if grep -q '^SIGNED' signed.txt; then spctl -a -t exec "$A"; fi
     open -n -W --stdout "$PWD/features.log" --stderr "$PWD/features.log" "$A" --args -- --features-quit
     grep -q "VIEWER-FEATURES rig=#{v.rig}" features.log || { echo "no VIEWER-FEATURES rig=#{v.rig}"; tail -5 features.log; exit 1; }
-    #{rig}
     U="$HOME/Library/Application Support/Godot/app_userdata/ModelExplorer"; rm -f "$U"/three-vrm-girl* "$U"/moves/three-vrm-girl*
     open -n -W --stdout "$PWD/walk.log" --stderr "$PWD/walk.log" "$A" --args -- "$T/three-vrm-girl.vrm" --move-quit
     grep -q MOVE-OK walk.log || { echo "no MOVE-OK"; grep -E 'MOVE-(FAIL|STEP)' walk.log | tail -5; exit 1; }
-    echo "MAC-TEST-OK $(grep -c 'MOVE-STEP.* ok$' walk.log) walk steps ok"
+    echo "MAC-TEST-OK $(grep -c 'MOVE-STEP.* ok$' walk.log) walk steps ok, $(cat signed.txt)"
     """
   end
 
+  # The Linux tar is checked to hold an x86-64 ELF and is reported UNTESTED: it cannot run on this
+  # Mac, and the container machine has no display server, so no window can open. A headless or
+  # virtual-display run would not be the real-window test, so none is made.
   def step_test_linux(ctx) do
     Enum.reduce_while(@viewers, :ok, fn v, _ ->
       d = Path.join([ctx.dir, "test-linux", v.key])
-      log = Path.join(d, "features.log")
-      env = [{"XDG_RUNTIME_DIR", "/mnt/wslg/runtime-dir"}, {"WAYLAND_DISPLAY", "wayland-0"}]
+      exe = Path.join(d, v.app)
 
       with :ok <- clean(d),
            {:ok, _} <- cap("tar", ["-xf", Path.join([ctx.dir, "pck", v.key, "#{v.app}-linux-x86_64.tar"]), "-C", d]),
-           {_, _} <- System.cmd(Path.join(d, v.app), ["--display-driver", "wayland", "--", "--features-quit"], env: env, stderr_to_stdout: true, cd: d, into: File.stream!(log)),
-           {:ok, out} <- File.read(log),
-           true <- String.contains?(out, "VIEWER-FEATURES rig=#{v.rig}") || {:error, "linux #{v.key}: no VIEWER-FEATURES rig=#{v.rig}: #{tail(out)}"} do
-        IO.puts("  linux #{v.key}: features OK")
+           {:ok, <<0x7F, "ELF", _::binary-size(12), machine::little-16, _::binary>>} <- File.read(exe),
+           true <- machine == @em_x86_64 || {:error, "linux #{v.key}: the program is not x86-64 (e_machine #{machine})"},
+           :ok <- File.write(Path.join(d, "UNTESTED.txt"), "linux #{v.key}: x86-64 ELF present, not run (no window can open in a container here)\n") do
+        IO.puts("  linux #{v.key}: UNTESTED (x86-64 ELF present; no window can open in a container here)")
         {:cont, :ok}
       else
+        {:ok, _} -> {:halt, {:error, "linux #{v.key}: #{v.app} is not an ELF"}}
         e -> {:halt, e}
       end
     end)
@@ -651,7 +659,7 @@ defmodule Release do
   @web_elfs ~w(skintokens.elf usd.elf mm.elf mujoco.elf headfit.elf)
 
   def step_web(ctx) do
-    cache = System.get_env("RELEASE_CACHE") || Path.expand("~/.cache/smoke-water-release")
+    cache = cache_dir()
     d = Path.join(ctx.dir, "web")
     mmg = Path.join([ctx.dir, "elf", "mmg", "data"])
 
@@ -720,7 +728,7 @@ defmodule Release do
     set +u; source "$C/emsdk/emsdk_env.sh" >/dev/null 2>&1; set -u
     (cd "$C/godot-webgpu" && ~/.pixi/bin/pixi exec --spec scons==4.11.1 --spec sccache -- \
       scons c_compiler_launcher=sccache cpp_compiler_launcher=sccache platform=web target=template_release \
-      webgpu=yes threads=yes precision=double dlink_enabled=yes -j"$(nproc)" > "$D/template.log" 2>&1) \
+      webgpu=yes threads=yes precision=double dlink_enabled=yes -j"$(getconf _NPROCESSORS_ONLN)" > "$D/template.log" 2>&1) \
       || { tail -20 "$D/template.log"; exit 1; }
     TPL=$C/godot-webgpu/bin/godot.web.template_release.double.wasm32.dlink.zip
     P=$R/4-entities/godot-sandbox-gdscript-compiler
@@ -739,11 +747,10 @@ defmodule Release do
     python3 "$REL/model-explorer/guest/build.py" "$D/work" "$C/compiler/build/src/gdscript/compiler/gdscript_to_riscv" \
       "$D/addon" "$TPL" $E > "$D/guest-build.log" 2>&1 || { grep -E '^BAD|^\{' "$D/guest-build.log" | head; exit 1; }
     tail -1 "$D/guest-build.log"
-    GD=$REL/engine/godot.linuxbsd.editor.double.x86_64
-    export XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir WAYLAND_DISPLAY=wayland-0
+    GD=$REL/engine/godot.macos.editor.double.arm64
     mkdir -p "$D/out"
-    "$GD" --display-driver wayland --resolution 640x360 --path "$D/work" --import > "$D/import.log" 2>&1 || true
-    "$GD" --display-driver wayland --resolution 640x360 --path "$D/work" --export-release Web "$D/out/index.html" > "$D/export.log" 2>&1 \
+    "$GD" --resolution 640x360 --path "$D/work" --import > "$D/import.log" 2>&1 || true
+    "$GD" --resolution 640x360 --path "$D/work" --export-release Web "$D/out/index.html" > "$D/export.log" 2>&1 \
       || { tail -20 "$D/export.log"; exit 1; }
     if grep -q "SCRIPT ERROR\|Parse Error" "$D/export.log"; then grep -m5 "SCRIPT ERROR\|Parse Error" "$D/export.log"; exit 1; fi
     for f in index.html index.js index.wasm index.side.wasm index.pck libgodot_riscv.web.template_release.double.wasm32.wasm; do
@@ -800,7 +807,7 @@ defmodule Release do
 
   def step_test_load(ctx) do
     rows =
-      Enum.flat_map(@viewers, fn v -> [load_windows(ctx, v), load_mac(ctx, v), load_linux(ctx, v)] end) ++
+      Enum.flat_map(@viewers, fn v -> [load_windows(ctx, v), load_mac(ctx, v), load_linux(v)] end) ++
         [load_web(ctx)]
 
     lines =
@@ -821,18 +828,15 @@ defmodule Release do
     end
   end
 
+  # Under Wine the time includes Wine's own start; it is reported as such.
   defp load_windows(ctx, v) do
-    what = "#{v.key} windows"
+    what = "#{v.key} windows (Wine, Apple GPU)"
+    d = Path.join([ctx.dir, "test-windows", v.key])
+    log = Path.join(d, "load.log")
 
-    with {:ok, profile} <- cap("cmd.exe", ["/c", "echo %USERPROFILE%"], [], "/mnt/c"),
-         {:ok, wpath} <- cap("wslpath", ["-u", String.trim(profile)]),
-         base = Path.join([String.trim(wpath), "Desktop", "release-test-#{ctx.id}"]),
-         {:ok, appdata} <- cap("cmd.exe", ["/c", "echo %APPDATA%"], [], "/mnt/c"),
-         {:ok, user} <- cap("wslpath", ["-u", String.trim(appdata) <> "\\Godot\\app_userdata\\ModelExplorer"]),
-         _ = File.rm_rf(Path.join(String.trim(user), "shader_cache")),
-         d = Path.join(base, v.key),
-         log = Path.join(d, "load.log"),
-         {:ok, _} <- win_run(Path.join(d, v.app <> ".exe"), [Path.join(base, "three-vrm-girl.vrm"), "--load-time-quit"], "LOAD-MS", log),
+    for f <- Path.wildcard(Path.join(wine_root(), "prefix/drive_c/users/*/AppData/Roaming/Godot/app_userdata/ModelExplorer/shader_cache")), do: File.rm_rf(f)
+
+    with {:ok, _} <- win_run(Path.join(d, v.app <> ".exe"), ["three-vrm-girl.vrm", "--load-time-quit"], "LOAD-MS", log),
          {:ok, out} <- File.read(log) do
       {what, load_ms(out, ~r/LOAD-MS (\d+)/)}
     else
@@ -842,13 +846,13 @@ defmodule Release do
 
   defp load_mac(ctx, v) do
     what = "#{v.key} macos"
-    t = "release-#{ctx.id}/test"
+    t = Path.join(ctx.dir, "test")
 
     script = """
     set -eu
-    cd ~/release-#{ctx.id}/#{v.key}
+    cd '#{Path.join([ctx.dir, "mac", v.key])}'
     rm -rf "$HOME/Library/Application Support/Godot/app_userdata/ModelExplorer/shader_cache"
-    open -n -W --stdout "$PWD/load.log" --stderr "$PWD/load.log" "$PWD/app/#{v.name}.app" --args -- ~/#{t}/three-vrm-girl.vrm --load-time-quit
+    open -n -W --stdout "$PWD/load.log" --stderr "$PWD/load.log" "$PWD/app/#{v.name}.app" --args -- '#{t}/three-vrm-girl.vrm' --load-time-quit
     grep LOAD-MS load.log || tail -5 load.log
     """
 
@@ -858,33 +862,18 @@ defmodule Release do
     end
   end
 
-  defp load_linux(ctx, v) do
-    what = "#{v.key} linux"
-    d = Path.join([ctx.dir, "test-linux", v.key])
-    exe = Path.join(d, v.app)
-    env = [{"XDG_RUNTIME_DIR", "/mnt/wslg/runtime-dir"}, {"WAYLAND_DISPLAY", "wayland-0"}]
-    girl = Path.join(ctx.root, "3-interactor/test-godot-vrm-motion-checker/fire_motion_check/art/three_girl/three-vrm-girl.vrm")
+  defp load_linux(v), do: {"#{v.key} linux", {:error, "UNTESTED (see test_linux)"}}
 
-    if File.exists?(exe) do
-      File.rm_rf(Path.expand("~/.local/share/godot/app_userdata/ModelExplorer/shader_cache"))
-      {out, _} = System.cmd(exe, ["--display-driver", "wayland", "--", girl, "--load-time-quit"], env: env, stderr_to_stdout: true, cd: d)
-      {what, load_ms(out, ~r/LOAD-MS (\d+)/)}
-    else
-      {what, {:error, "no #{exe} (the Linux test has not run)"}}
-    end
-  end
-
-  # The web export is served from the Mac with the Space's headers (COOP/COEP/CORP) and timed in
-  # Chrome there: the desk's WSL has no WebGPU adapter.
+  # The web export is served from this Mac with the Space's headers (COOP/COEP/CORP) and timed in
+  # Chrome here.
   defp load_web(ctx) do
     what = "walk-mode web (Chrome, macOS)"
-    remote = "release-#{ctx.id}/web"
     out = Path.join([ctx.dir, "web", "out"])
     tool = Path.join(ctx.dir, "model-explorer/tools/web_load_time.mjs")
 
     script = """
     set -eu
-    cd ~/#{remote}
+    cd '#{Path.join(ctx.dir, "web")}'
     cat > serve.py <<'PY'
     import functools, http.server, sys
     class H(http.server.SimpleHTTPRequestHandler):
@@ -898,16 +887,13 @@ defmodule Release do
     print(s.server_address[1], flush=True)
     s.serve_forever()
     PY
-    # The server prints its port once it is listening; read blocks until then.
     exec 3< <(exec python3 serve.py out)
     read -r PORT <&3
     trap 'pkill -f "serve.py out" || true' EXIT
-    /opt/homebrew/bin/node web_load_time.mjs "http://127.0.0.1:$PORT/index.html" 120
+    node '#{tool}' "http://127.0.0.1:$PORT/index.html" 120
     """
 
     with true <- File.dir?(out) || {:error, "no web export (the web step has not run)"},
-         {:ok, _} <- mac(ctx, "rm -rf ~/#{remote} && mkdir -p ~/#{remote}"),
-         {:ok, _} <- cap("scp", ["-q", "-r", out, tool, "#{ctx.mac}:#{remote}/"]),
          {:ok, log} <- mac(ctx, script) do
       {what, load_ms(log, ~r/WEB-LOAD-MS (\d+)/)}
     else
@@ -915,11 +901,105 @@ defmodule Release do
     end
   end
 
+  # Stage the finished run in ~/release-<id>/<viewer>: the archives, SHA256SUMS (checked here), the
+  # notices, the sources, the load times and the .done markers. Nothing is uploaded.
+  def step_stage(ctx) do
+    dest = Path.join(System.user_home!(), "release-" <> ctx.id)
+
+    Enum.reduce_while(@viewers, :ok, fn v, _ ->
+      o = Path.join([ctx.dir, "pck", v.key])
+      t = Path.join(dest, v.key)
+      keep = archives(v) ++ ~w(SHA256SUMS)
+
+      with :ok <- clean(t),
+           :ok <- copy_all(keep, o, t),
+           :ok <- copy_all(~w(LICENSE.md NOTICE CITATION.cff), Path.join([ctx.dir, "notices", v.key]), t),
+           :ok <- copy_all(Enum.filter(~w(SOURCES.txt LOAD.txt), &File.exists?(Path.join(ctx.dir, &1))), ctx.dir, t),
+           :ok <- copy_all(Path.wildcard(Path.join(ctx.dir, "test-linux/#{v.key}/UNTESTED.txt")) |> Enum.map(&Path.basename/1), Path.join([ctx.dir, "test-linux", v.key]), t),
+           {:ok, _} <- File.cp_r(Path.join(ctx.dir, ".done"), Path.join(t, ".done")) |> cp_ok(),
+           :ok <- (if v.web, do: stage_web(ctx, t), else: :ok),
+           :ok <- check_sums(t, archives(v)),
+           :ok <- control("staged archives", t, archives(v)) do
+        IO.puts("  staged #{t}")
+        {:cont, :ok}
+      else
+        e -> {:halt, e}
+      end
+    end)
+  end
+
+  defp cp_ok({:ok, l}), do: {:ok, l}
+  defp cp_ok({:error, r, f}), do: {:error, "cannot copy #{f}: #{r}"}
+
+  defp stage_web(ctx, t) do
+    src = Path.join([ctx.dir, "web", "out"])
+    if File.dir?(src), do: (with {:ok, _} <- File.cp_r(src, Path.join(t, "godot")) |> cp_ok(), do: :ok), else: :ok
+  end
+
+  defp copy_all(names, from, to) do
+    Enum.reduce_while(names, :ok, fn f, _ ->
+      case File.copy(Path.join(from, f), Path.join(to, f)) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, r} -> {:halt, {:error, "cannot copy #{Path.join(from, f)}: #{r}"}}
+      end
+    end)
+  end
+
+  # ---- checksum gates, each with its planted failing control ------------------------------------
+
+  # Every file in `files` equals its line in d/SHA256SUMS.
+  defp check_sums(d, files) do
+    with {:ok, sums} <- File.read(Path.join(d, "SHA256SUMS")) do
+      Enum.reduce_while(files, :ok, fn f, _ ->
+        with want when is_binary(want) <- sum_for(sums, f) || {:error, "#{d}/SHA256SUMS lacks #{f}"},
+             {:ok, got} <- sha256(Path.join(d, f)),
+             true <- got == want || {:error, "#{f} does not match #{d}/SHA256SUMS"} do
+          {:cont, :ok}
+        else
+          e -> {:halt, e}
+        end
+      end)
+    end
+  end
+
+  # A check that cannot fail proves nothing: flip one byte of the smallest file in a copy, and the
+  # same check must refuse the copy.
+  defp control(name, d, files) do
+    t = Path.join(d, ".control")
+    {small, _} = files |> Enum.map(&{&1, File.stat!(Path.join(d, &1)).size}) |> Enum.min_by(&elem(&1, 1))
+
+    with :ok <- clean(t),
+         {:ok, _} <- File.copy(Path.join(d, "SHA256SUMS"), Path.join(t, "SHA256SUMS")),
+         {:ok, <<first, rest::binary>>} <- File.read(Path.join(d, small)),
+         :ok <- File.write(Path.join(t, small), <<Bitwise.bxor(first, 0xFF), rest::binary>>) do
+      result = check_sums(t, [small])
+      File.rm_rf(t)
+
+      case result do
+        {:error, _} -> IO.puts("  control #{name}: a corrupted #{small} failed the check, as planned"); :ok
+        :ok -> {:error, "control #{name}: a corrupted #{small} PASSED the check; the gate is broken"}
+      end
+    end
+  end
+
+  defp write_sums(d, files) do
+    Enum.reduce_while(files, {:ok, []}, fn f, {:ok, acc} ->
+      case sha256(Path.join(d, f)) do
+        {:ok, h} -> {:cont, {:ok, ["#{h}  #{f}\n" | acc]}}
+        e -> {:halt, e}
+      end
+    end)
+    |> case do
+      {:ok, lines} -> File.write(Path.join(d, "SHA256SUMS"), Enum.reverse(lines))
+      e -> e
+    end
+  end
+
   def step_publish(%{publish: "none"}), do: (IO.puts("  --publish none: nothing uploaded"); :ok)
 
   def step_publish(ctx) do
     # The gate comes from interactor-skintokens-qlora main as fetched now, not from whatever commit
-    # the desk's checkout sits on (an old checkout has no REVISION and would publish to main).
+    # the client's checkout sits on (an old checkout has no REVISION and would publish to main).
     q = Path.join(ctx.root, "3-interactor/skintokens-qlora")
     gd = Path.join(ctx.dir, "gate")
     gate = Path.join(gd, "tools/space_gate.py")
@@ -1062,12 +1142,14 @@ defmodule Release do
     end
   end
 
+  # A shell script run here, on the Mac.
   defp mac(ctx, script) do
-    f = Path.join(ctx.dir, "mac-#{System.unique_integer([:positive])}.sh")
+    f = Path.join(ctx.dir, "step-#{System.unique_integer([:positive])}.sh")
 
-    with :ok <- File.write(f, script),
-         {:ok, _} <- cap("scp", ["-q", f, "#{ctx.mac}:release-step.sh"]) do
-      cap("ssh", ["-o", "BatchMode=yes", ctx.mac, "bash ~/release-step.sh"])
+    with :ok <- File.write(f, script) do
+      r = cap("bash", [f])
+      File.rm(f)
+      r
     end
   end
 

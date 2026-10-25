@@ -166,6 +166,23 @@ def plain(p):
     r = rel[p]
     return r in PLAIN_FILES or r.startswith(PLAIN_DIRS)
 
+# A plain script that names a class compiled into a guest fails to parse on the web ("Could not
+# find type"): compiled scripts are not global classes for stock GDScript. So every class a plain
+# script names (and what those name in turn) stays plain too.
+def strip_comments(s):
+    return re.sub(r'#[^\n]*', '', s)
+
+grew = True
+while grew:
+    grew = False
+    for p in [q for q in files if plain(q)]:
+        body = strip_comments(srcs[p])
+        for n, q in classes.items():
+            if q != p and not plain(q) and re.search(r'\b%s\b' % re.escape(n), body):
+                PLAIN_FILES.add(rel[q])
+                print('PLAIN-BY-USE', rel[q], 'named in', rel[p])
+                grew = True
+
 compiled = [p for p in files if not plain(p)]
 # The export leaves out every compiled script's source, and keeps the plain ones.
 ep.write_text(ep.read_text().replace('exclude_filter="*.gd"', 'exclude_filter="%s"' % ','.join(rel[p] for p in compiled)))

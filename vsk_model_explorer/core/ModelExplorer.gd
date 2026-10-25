@@ -100,6 +100,12 @@ func _ready():
 	if ClassDB.get_class_list().find("FBXDocument") != -1:
 		fbx_doc = ClassDB.instantiate("FBXDocument")
 
+	# --load-time-quit: print the time from engine start to the first drawn frame that shows the
+	# opened model (or the empty stage when no file is given), then quit. The release's load check
+	# reads the LOAD-MS line.
+	if "--load-time-quit" in OS.get_cmdline_user_args():
+		_report_load_time()
+
 	# Check for command-line arguments (files opened via file association)
 	call_deferred("_check_command_line_args")
 
@@ -137,6 +143,22 @@ func _check_command_line_args():
 			if ext in ["glb", "gltf", "vrm", "fbx"] or ext in USD_EXTENSIONS:
 				_load_file(file_path)
 				break
+
+
+func _report_load_time() -> void:
+	var opens_file := false
+	for a in OS.get_cmdline_user_args():
+		if not a.begins_with("--") and FileAccess.file_exists(a):
+			opens_file = true
+	var ok := true
+	if opens_file:
+		var got = await gltf_is_loaded
+		ok = got[0]
+	# Two drawn frames: the first one after the load can still show the stage without the model.
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	print("LOAD-MS %d ok=%s file=%s" % [Time.get_ticks_msec(), ok, opens_file])
+	get_tree().quit(0 if ok else 1)
 
 
 func _place_color_chart() -> void:

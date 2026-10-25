@@ -36,7 +36,7 @@
 # Functions return {:ok, value} or {:error, reason}; nothing raises.
 
 defmodule Release do
-  @steps ~w(engine sandbox guests weights source notices pck package dmg test_windows test_mac test_linux web publish)
+  @steps ~w(engine sandbox guests weights source notices pck package dmg test_windows test_mac test_linux web test_load publish)
   @max_private_mb 8192
   # The macOS image is signed with this Developer ID (in the Mac's release-signing keychain) and
   # notarized; the test then checks Gatekeeper accepts it.
@@ -786,6 +786,132 @@ defmodule Release do
        |> String.replace("const engine = new Engine(GODOT_CONFIG);", @appsignal_print <> "const engine = new Engine(GODOT_CONFIG);", global: false)
        |> String.replace("function displayFailureNotice(err) {\n", "function displayFailureNotice(err) {\n" <> fail, global: false)
        |> String.replace("</body>", @appsignal_note <> "</body>", global: false)}
+    end
+  end
+
+  # ---- load time (the Meta Quest TRC allows 4 s from open to first useful frame, cold) -------
+  #
+  # A faux gate for now (operator: "be incremental"): it measures every viewer on every OS and the
+  # web viewer, prints PASS or FAIL against @load_limit_ms and writes LOAD.txt, but never stops the
+  # run. Desktop: the viewer's --load-time-quit prints LOAD-MS, the time from engine start to the
+  # second drawn frame with three-vrm-girl.vrm on screen, with the shader cache emptied first.
+  # Web: Chrome with a fresh profile, from navigation start to "BOOT loaded" (sample model shown).
+  @load_limit_ms 4000
+
+  def step_test_load(ctx) do
+    rows =
+      Enum.flat_map(@viewers, fn v -> [load_windows(ctx, v), load_mac(ctx, v), load_linux(ctx, v)] end) ++
+        [load_web(ctx)]
+
+    lines =
+      Enum.map(rows, fn
+        {what, {:ok, ms}} -> "LOAD #{what} #{ms} ms #{if ms <= @load_limit_ms, do: "PASS", else: "FAIL"} (limit #{@load_limit_ms} ms)"
+        {what, {:error, why}} -> "LOAD #{what} no measurement: #{why}"
+      end)
+
+    Enum.each(lines, &IO.puts("  " <> &1))
+    IO.puts("  (faux gate: a FAIL is reported, the run goes on)")
+    File.write(Path.join(ctx.dir, "LOAD.txt"), Enum.join(lines, "\n") <> "\n")
+  end
+
+  defp load_ms(text, re) do
+    case Regex.run(re, text) do
+      [_, ms] -> {:ok, String.to_integer(ms)}
+      _ -> {:error, "no load line; last lines: #{tail(text)}"}
+    end
+  end
+
+  defp load_windows(ctx, v) do
+    what = "#{v.key} windows"
+
+    with {:ok, profile} <- cap("cmd.exe", ["/c", "echo %USERPROFILE%"], [], "/mnt/c"),
+         {:ok, wpath} <- cap("wslpath", ["-u", String.trim(profile)]),
+         base = Path.join([String.trim(wpath), "Desktop", "release-test-#{ctx.id}"]),
+         {:ok, appdata} <- cap("cmd.exe", ["/c", "echo %APPDATA%"], [], "/mnt/c"),
+         {:ok, user} <- cap("wslpath", ["-u", String.trim(appdata) <> "\\Godot\\app_userdata\\ModelExplorer"]),
+         _ = File.rm_rf(Path.join(String.trim(user), "shader_cache")),
+         d = Path.join(base, v.key),
+         log = Path.join(d, "load.log"),
+         {:ok, _} <- win_run(Path.join(d, v.app <> ".exe"), [Path.join(base, "three-vrm-girl.vrm"), "--load-time-quit"], "LOAD-MS", log),
+         {:ok, out} <- File.read(log) do
+      {what, load_ms(out, ~r/LOAD-MS (\d+)/)}
+    else
+      {:error, why} -> {what, {:error, why}}
+    end
+  end
+
+  defp load_mac(ctx, v) do
+    what = "#{v.key} macos"
+    t = "release-#{ctx.id}/test"
+
+    script = """
+    set -eu
+    cd ~/release-#{ctx.id}/#{v.key}
+    rm -rf "$HOME/Library/Application Support/Godot/app_userdata/ModelExplorer/shader_cache"
+    open -n -W --stdout "$PWD/load.log" --stderr "$PWD/load.log" "$PWD/app/#{v.name}.app" --args -- ~/#{t}/three-vrm-girl.vrm --load-time-quit
+    grep LOAD-MS load.log || tail -5 load.log
+    """
+
+    case mac(ctx, script) do
+      {:ok, out} -> {what, load_ms(out, ~r/LOAD-MS (\d+)/)}
+      {:error, why} -> {what, {:error, why}}
+    end
+  end
+
+  defp load_linux(ctx, v) do
+    what = "#{v.key} linux"
+    d = Path.join([ctx.dir, "test-linux", v.key])
+    exe = Path.join(d, v.app)
+    env = [{"XDG_RUNTIME_DIR", "/mnt/wslg/runtime-dir"}, {"WAYLAND_DISPLAY", "wayland-0"}]
+    girl = Path.join(ctx.root, "3-interactor/test-godot-vrm-motion-checker/fire_motion_check/art/three_girl/three-vrm-girl.vrm")
+
+    if File.exists?(exe) do
+      File.rm_rf(Path.expand("~/.local/share/godot/app_userdata/ModelExplorer/shader_cache"))
+      {out, _} = System.cmd(exe, ["--display-driver", "wayland", "--", girl, "--load-time-quit"], env: env, stderr_to_stdout: true, cd: d)
+      {what, load_ms(out, ~r/LOAD-MS (\d+)/)}
+    else
+      {what, {:error, "no #{exe} (the Linux test has not run)"}}
+    end
+  end
+
+  # The web export is served from the Mac with the Space's headers (COOP/COEP/CORP) and timed in
+  # Chrome there: the desk's WSL has no WebGPU adapter.
+  defp load_web(ctx) do
+    what = "walk-mode web (Chrome, macOS)"
+    remote = "release-#{ctx.id}/web"
+    out = Path.join([ctx.dir, "web", "out"])
+    tool = Path.join(ctx.dir, "model-explorer/tools/web_load_time.mjs")
+
+    script = """
+    set -eu
+    cd ~/#{remote}
+    cat > serve.py <<'PY'
+    import functools, http.server, sys
+    class H(http.server.SimpleHTTPRequestHandler):
+        def end_headers(self):
+            for k, v in (("Cross-Origin-Embedder-Policy", "require-corp"), ("Cross-Origin-Opener-Policy", "same-origin"), ("Cross-Origin-Resource-Policy", "cross-origin"), ("Cache-Control", "no-store")):
+                self.send_header(k, v)
+            super().end_headers()
+        def log_message(self, *a):
+            pass
+    s = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(H, directory=sys.argv[1]))
+    print(s.server_address[1], flush=True)
+    s.serve_forever()
+    PY
+    # The server prints its port once it is listening; read blocks until then.
+    exec 3< <(exec python3 serve.py out)
+    read -r PORT <&3
+    trap 'pkill -f "serve.py out" || true' EXIT
+    /opt/homebrew/bin/node web_load_time.mjs "http://127.0.0.1:$PORT/index.html" 120
+    """
+
+    with true <- File.dir?(out) || {:error, "no web export (the web step has not run)"},
+         {:ok, _} <- mac(ctx, "rm -rf ~/#{remote} && mkdir -p ~/#{remote}"),
+         {:ok, _} <- cap("scp", ["-q", "-r", out, tool, "#{ctx.mac}:#{remote}/"]),
+         {:ok, log} <- mac(ctx, script) do
+      {what, load_ms(log, ~r/WEB-LOAD-MS (\d+)/)}
+    else
+      {:error, why} -> {what, {:error, why}}
     end
   end
 

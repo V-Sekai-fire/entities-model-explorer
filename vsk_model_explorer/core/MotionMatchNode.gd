@@ -1,12 +1,10 @@
 extends AnimationNodeExtension
 # The motion-matching node of walk mode's AnimationTree. Each tree update it steps mm.elf
 # (interactor-motion-matching-guest) by the frame time with the controller's input, and plays the
-# clip frame mm.elf picks. A new pick cross-fades from the previous clip over BLEND seconds: the
-# AnimationTree blends the two clips by weight.
+# clip frame mm.elf picks, alone and at full weight: a new pick replaces the previous clip at once,
+# with no cross-fade, so every frame shows one clip under its own root turn.
 # MotionMatch.gd sets the input fields before it advances the tree, and reads the output fields
 # after.
-
-const BLEND := 0.2
 
 # Set once.
 var mm: Node
@@ -22,15 +20,10 @@ var clip := -1
 var time := 0.0
 var result := PackedFloat32Array()
 var seams := 0  # loop seams played through without a seek
-var _prev := -1
-var _prev_time := 0.0
-var _fade := BLEND
 
 
 func reset() -> void:
 	clip = -1
-	_prev = -1
-	_fade = BLEND
 	result = PackedFloat32Array()
 
 
@@ -61,24 +54,12 @@ func _process_animation_node(
 	)
 	seams += 1 if wrapped else 0
 	if picked != clip or r[8] > 0.5:
-		if clip >= 0:
-			_prev = clip
-			_prev_time = time
-			_fade = 0.0
 		clip = picked
 		seeked = true
 	elif not wrapped and abs(time + delta - t) > 0.05:
 		seeked = true
 	time = t
-	_fade += delta
-	var w: float = clamp(_fade / BLEND, 0.0, 1.0)
-	if _prev >= 0 and w < 1.0:
-		_prev_time = clip_time(_prev, _prev_time + delta)
-		blend_animation(names[_prev], _prev_time, delta, false, false, 1.0 - w)
-	else:
-		_prev = -1
-		w = 1.0
-	blend_animation(names[clip], t, delta, seeked, false, w)
+	blend_animation(names[clip], t, delta, seeked, false, 1.0)
 	info[1] = t
 	info[3] = Animation.LOOP_LINEAR if is_loop(clip) else Animation.LOOP_NONE
 	return info
@@ -86,10 +67,3 @@ func _process_animation_node(
 
 func is_loop(i: int) -> bool:
 	return i >= 0 and i < loops.size() and loops[i] == 1
-
-
-# A time in clip i: a loop cycles through its seam, a one-shot holds its last frame.
-func clip_time(i: int, t: float) -> float:
-	if i < 0 or i >= lengths.size() or lengths[i] <= 0.0:
-		return t
-	return fposmod(t, lengths[i]) if is_loop(i) else clampf(t, 0.0, lengths[i])

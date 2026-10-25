@@ -38,6 +38,9 @@
 defmodule Release do
   @steps ~w(engine sandbox guests weights source notices pck package dmg test_windows test_mac test_linux web publish)
   @max_private_mb 8192
+  # The macOS image is signed with this Developer ID (in the Mac's release-signing keychain) and
+  # notarized; the test then checks Gatekeeper accepts it.
+  @sign_id "Developer ID Application: Ernest Lee (F48WQK5Y2R)"
   @viewers [
     %{key: "skintokens", app: "skintokens-viewer", name: "SkinTokens Viewer",
       repo: "chibifire/interactor-skintokens-viewer", space: "chibifire/skintokens-auto-rig", rig: true, mac_zip: true, web: false},
@@ -456,11 +459,41 @@ defmodule Release do
     P
     plutil -lint "$C/Info.plist" >/dev/null
     find stage -name '._*' -delete; xattr -cr stage
-    codesign --force --deep -s - "stage/#{v.name}.app"; codesign --verify --deep --strict "stage/#{v.name}.app"
+    # Developer ID signing, inside out, with the hardened runtime. The key is in its own keychain
+    # (login's keys are locked to an ssh session); its password and the notary key are in OpenBao.
+    export PATH=/opt/homebrew/bin:$PATH
+    . ~/.local/bin/bao-login.sh >/dev/null 2>&1
+    KC=$HOME/Library/Keychains/release-signing.keychain-db
+    security unlock-keychain -p "$(bao kv get -field=password "secret/agents-own/$BAO_CN/apple-signing-keychain")" "$KC"
+    security list-keychains -d user | grep -q release-signing || security list-keychains -d user -s "$KC" "$HOME/Library/Keychains/login.keychain-db"
+    ID="#{@sign_id}"
+    cat > ent.plist <<'P'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0"><dict><key>com.apple.security.cs.disable-library-validation</key><true/></dict></plist>
+    P
+    codesign --force --timestamp --options runtime -s "$ID" "$C/Frameworks/libgodot_riscv.macos.template_release.double.universal.framework"
+    codesign --force --timestamp --options runtime --entitlements ent.plist -s "$ID" "stage/#{v.name}.app"
+    codesign --verify --deep --strict "stage/#{v.name}.app"
     ln -s /Applications stage/Applications; cp unz/LICENSE.md unz/NOTICE unz/CITATION.cff stage/
     COPYFILE_DISABLE=1 hdiutil create -quiet -volname "#{v.name}" -srcfolder stage -fs APFS -format ULFO -ov #{dmg}
     hdiutil verify -quiet #{dmg}
-    rm -rf unz stage
+    codesign --force --timestamp -s "$ID" #{dmg}
+    # Notarize with the App Store Connect key; the PEM is rebuilt from its base64 characters (the
+    # stored copy is on one line). The key file lives only for this step.
+    K=$(mktemp -d); trap 'rm -rf "$K"' EXIT
+    bao kv get -format=json "secret/agents-own/$BAO_CN/apple-notary-key" | python3 -c '
+    import json, re, sys, os
+    d = json.load(sys.stdin)["data"]["data"]
+    b = re.sub(r"[^A-Za-z0-9+/=]", "", re.sub(r"-----(BEGIN|END) PRIVATE KEY-----", "", d["p8"]))
+    k = sys.argv[1]
+    open(os.path.join(k, "key.p8"), "w").write("-----BEGIN PRIVATE KEY-----\\n" + "\\n".join(b[i:i + 64] for i in range(0, len(b), 64)) + "\\n-----END PRIVATE KEY-----\\n")
+    open(os.path.join(k, "id"), "w").write(d["key_id"].strip()); open(os.path.join(k, "iss"), "w").write(d["issuer_id"].strip())' "$K"
+    xcrun notarytool submit #{dmg} --key "$K/key.p8" --key-id "$(cat "$K/id")" --issuer "$(cat "$K/iss")" --wait --timeout 2h > notary.log 2>&1 || true
+    grep -q "status: Accepted" notary.log || { tail -5 notary.log; exit 1; }
+    xcrun stapler staple -q #{dmg}
+    spctl -a -t open --context context:primary-signature #{dmg}
+    rm -rf unz stage ent.plist
     echo DMG-OK
     """
   end
@@ -573,8 +606,11 @@ defmodule Release do
     rm -rf mnt app; mkdir mnt app
     hdiutil attach -quiet -nobrowse -readonly -mountpoint "$PWD/mnt" #{v.app}-macos-arm64.dmg
     codesign --verify --deep --strict "mnt/#{v.name}.app"
+    spctl -a -t open --context context:primary-signature #{v.app}-macos-arm64.dmg
+    xcrun stapler validate -q #{v.app}-macos-arm64.dmg
     ditto "mnt/#{v.name}.app" "app/#{v.name}.app"; hdiutil detach -quiet mnt
     A="$PWD/app/#{v.name}.app"
+    spctl -a -t exec "$A"
     open -n -W --stdout "$PWD/features.log" --stderr "$PWD/features.log" "$A" --args -- --features-quit
     grep -q "VIEWER-FEATURES rig=#{v.rig}" features.log || { echo "no VIEWER-FEATURES rig=#{v.rig}"; tail -5 features.log; exit 1; }
     #{rig}

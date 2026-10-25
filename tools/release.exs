@@ -643,17 +643,26 @@ defmodule Release do
 
       with :ok <- clean(d),
            {:ok, _} <- cap("tar", ["-xf", Path.join([ctx.dir, "pck", v.key, "#{v.app}-linux-x86_64.tar"]), "-C", d]),
-           {:ok, <<0x7F, "ELF", _::binary-size(12), machine::little-16, _::binary>>} <- File.read(exe),
-           true <- machine == @em_x86_64 || {:error, "linux #{v.key}: the program is not x86-64 (e_machine #{machine})"},
+           {:ok, bin} <- File.read(exe),
+           :ok <- elf_x86_64(bin, "linux #{v.key}"),
+           {:error, _} <- elf_x86_64(<<0x7F, "ELF", 2, 1, 1, 0::size(72), 3::little-16, 183::little-16>>, "control"),
            :ok <- File.write(Path.join(d, "UNTESTED.txt"), "linux #{v.key}: x86-64 ELF present, not run (no window can open in a container here)\n") do
         IO.puts("  linux #{v.key}: UNTESTED (x86-64 ELF present; no window can open in a container here)")
         {:cont, :ok}
       else
-        {:ok, _} -> {:halt, {:error, "linux #{v.key}: #{v.app} is not an ELF"}}
+        :ok -> {:halt, {:error, "linux #{v.key}: the planted non-x86 control PASSED; the gate is broken"}}
         e -> {:halt, e}
       end
     end)
   end
+
+  # e_ident is 16 bytes (magic 4 + 12), then e_type (2), then e_machine (2). The control above feeds an
+  # aarch64 header (machine 183): the gate must refuse it, or it checks nothing.
+  defp elf_x86_64(<<0x7F, "ELF", _::binary-size(12), _type::little-16, machine::little-16, _::binary>>, what) do
+    if machine == @em_x86_64, do: :ok, else: {:error, "#{what}: the program is not x86-64 (e_machine #{machine})"}
+  end
+
+  defp elf_x86_64(_, what), do: {:error, "#{what}: the program is not an ELF"}
 
   # ---- web viewer (the Spaces' godot/ frame) ---------------------------------------------------
   #

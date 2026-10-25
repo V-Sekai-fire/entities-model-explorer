@@ -11,6 +11,8 @@
 #   pixi run release --resume <dir>           continue a stopped run; finished steps are skipped
 #                                             (new runs go under $RELEASE_ROOT, default <root>/.release)
 #   pixi run release --until <step>           stop after a step (see @steps)
+#   pixi run release --skip <step>            leave a step out (repeat for more): the staged folder gets INCOMPLETE.txt
+#                                             and --publish refuses
 #   pixi run release --branch <repo>=<branch> take that guest's ELF from its newest green run on
 #                                             <branch> instead of main (a release candidate);
 #                                             repeat for more repos, the source is recorded
@@ -84,18 +86,21 @@ defmodule Release do
 
   defp run(argv) do
     {opts, _, bad} =
-      OptionParser.parse(argv, strict: [desk: :boolean, publish: :string, ref: :string, resume: :string, until: :string, branch: :keep])
+      OptionParser.parse(argv, strict: [desk: :boolean, publish: :string, ref: :string, resume: :string, until: :string, skip: :keep, branch: :keep])
 
     with :ok <- if(opts[:desk], do: {:error, "--desk refuses: the Windows desk is blocklisted, the release runs on this Mac"}, else: :ok),
          :ok <- if(bad == [], do: :ok, else: {:error, "unknown options #{inspect(bad)}"}),
          {:ok, root} <- workspace_root(),
          publish = opts[:publish] || "none",
          :ok <- if(publish in ~w(none dev main), do: :ok, else: {:error, "--publish is none, dev or main"}),
+         skip = Keyword.get_values(opts, :skip),
+         :ok <- if(Enum.all?(skip, &(&1 in @steps)), do: :ok, else: {:error, "--skip is one of #{Enum.join(@steps, " ")}"}),
+         :ok <- if(skip == [] or publish == "none", do: :ok, else: {:error, "--skip leaves the release incomplete: it cannot be published"}),
          until = opts[:until] || List.last(@steps),
          :ok <- if(until in @steps, do: :ok, else: {:error, "--until is one of #{Enum.join(@steps, " ")}"}),
          dir = opts[:resume] || Path.join(release_root(root), stamp()),
          :ok <- File.mkdir_p(Path.join(dir, ".done")) do
-      ctx = %{root: root, dir: dir, publish: publish, ref: opts[:ref] || System.get_env("RELEASE_REF") || "origin/main", id: Path.basename(dir),
+      ctx = %{root: root, dir: dir, publish: publish, ref: opts[:ref] || System.get_env("RELEASE_REF") || "origin/main", id: Path.basename(dir), skip: skip,
               branches: Map.new(Keyword.get_values(opts, :branch), &List.to_tuple(String.split(&1, "=", parts: 2)))}
       IO.puts("release #{ctx.id} in #{dir} (publish: #{publish})")
       steps = Enum.take_while(@steps, &(&1 != until)) ++ [until]
@@ -104,16 +109,22 @@ defmodule Release do
         # Publishing to dev and then to main from the same folder are two different steps.
         marker = Path.join([dir, ".done", if(step == "publish", do: "publish-" <> publish, else: step)])
 
-        if File.exists?(marker) do
-          IO.puts("== #{step}: done in an earlier run")
-          {:cont, acc}
-        else
-          IO.puts("== #{step}")
+        cond do
+          step in skip ->
+            IO.puts("== #{step}: SKIPPED by --skip; the staged folder is marked incomplete")
+            {:cont, acc}
 
-          case apply(__MODULE__, String.to_atom("step_" <> step), [ctx]) do
-            :ok -> File.write(marker, stamp()); {:cont, acc}
-            {:error, reason} -> {:halt, {:error, {String.to_atom(step), reason}}}
-          end
+          File.exists?(marker) ->
+            IO.puts("== #{step}: done in an earlier run")
+            {:cont, acc}
+
+          true ->
+            IO.puts("== #{step}")
+
+            case apply(__MODULE__, String.to_atom("step_" <> step), [ctx]) do
+              :ok -> File.write(marker, stamp()); {:cont, acc}
+              {:error, reason} -> {:halt, {:error, {String.to_atom(step), reason}}}
+            end
         end
       end)
     end
@@ -932,6 +943,7 @@ defmodule Release do
            :ok <- copy_all(~w(LICENSE.md NOTICE CITATION.cff), Path.join([ctx.dir, "notices", v.key]), t),
            :ok <- copy_all(Enum.filter(~w(SOURCES.txt LOAD.txt), &File.exists?(Path.join(ctx.dir, &1))), ctx.dir, t),
            :ok <- copy_all(Path.wildcard(Path.join(ctx.dir, "test-linux/#{v.key}/UNTESTED.txt")) |> Enum.map(&Path.basename/1), Path.join([ctx.dir, "test-linux", v.key]), t),
+           :ok <- (if ctx.skip == [], do: :ok, else: File.write(Path.join(t, "INCOMPLETE.txt"), "skipped by --skip: #{Enum.join(ctx.skip, " ")}\n")),
            {:ok, _} <- File.cp_r(Path.join(ctx.dir, ".done"), Path.join(t, ".done")) |> cp_ok(),
            :ok <- (if v.web, do: stage_web(ctx, t), else: :ok),
            :ok <- check_sums(t, archives(v)),

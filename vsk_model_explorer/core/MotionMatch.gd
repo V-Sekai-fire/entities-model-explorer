@@ -1236,8 +1236,8 @@ func _process(delta: float) -> void:
 		status.call(label)
 
 
-# x: the largest angle in radians between a bone's pose and the picked clip at the node's time,
-# when no cross-fade runs. y: how far the hips are from the character on the floor.
+# x: the largest angle in radians between a bone's pose and the picked clip at the node's time.
+# y: how far the hips are from the character on the floor.
 func _pose_error() -> Vector2:
 	if not _node or _node.clip < 0 or not _skeleton:
 		return Vector2(-1, -1)
@@ -1245,8 +1245,6 @@ func _pose_error() -> Vector2:
 		_skeleton.get_bone_global_pose(_skeleton.find_bone(_hips_path.get_slice(":", 1))).origin
 	)
 	var off := Vector2(hips.x - _last_world.x, hips.z - _last_world.z).length()
-	if _node._prev >= 0:
-		return Vector2(0, off)
 	var anim := _player.get_animation(PREFIX + _keys[_node.clip])
 	var worst := 0.0
 	for t in anim.get_track_count():

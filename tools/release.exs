@@ -624,11 +624,11 @@ defmodule Release do
     ditto "mnt/#{v.name}.app" "app/#{v.name}.app"; hdiutil detach -quiet mnt
     A="$PWD/app/#{v.name}.app"
     if grep -q '^SIGNED' signed.txt; then spctl -a -t exec "$A"; fi
-    open -n -W --stdout "$PWD/features.log" --stderr "$PWD/features.log" "$A" --args -- --features-quit
+    open -n -W --stdout "$PWD/features.log" --stderr "$PWD/features.err" "$A" --args -- --features-quit
     grep -q "VIEWER-FEATURES rig=#{v.rig}" features.log || { echo "no VIEWER-FEATURES rig=#{v.rig}"; tail -5 features.log; exit 1; }
     U="$HOME/Library/Application Support/Godot/app_userdata/ModelExplorer"; rm -f "$U"/three-vrm-girl* "$U"/moves/three-vrm-girl*
-    open -n -W --stdout "$PWD/walk.log" --stderr "$PWD/walk.log" "$A" --args -- "$T/three-vrm-girl.vrm" --move-quit
-    grep -q MOVE-OK walk.log || { echo "no MOVE-OK"; grep -E 'MOVE-(FAIL|STEP)' walk.log | tail -5; exit 1; }
+    open -n -W --stdout "$PWD/walk.log" --stderr "$PWD/walk.err" "$A" --args -- "$T/three-vrm-girl.vrm" --move-quit
+    grep -q MOVE-OK walk.log || { echo "no MOVE-OK (stdout only: stderr goes to walk.err so the two cannot interleave)"; grep -E 'MOVE-(FAIL|STEP)' walk.log | tail -5; exit 1; }
     echo "MAC-TEST-OK $(grep -c 'MOVE-STEP.* ok$' walk.log) walk steps ok, $(cat signed.txt)"
     """
   end

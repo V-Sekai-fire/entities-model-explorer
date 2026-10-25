@@ -454,7 +454,14 @@ defmodule Release do
     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
     <plist version="1.0"><dict><key>com.apple.security.cs.disable-library-validation</key><true/></dict></plist>
     P
-      codesign --force --timestamp --options runtime -s "$ID" "$C/Frameworks/libgodot_riscv.macos.template_release.double.universal.framework"
+      FW="$C/Frameworks/libgodot_riscv.macos.template_release.double.universal.framework"
+      mkdir -p "$FW/Resources"
+      cat > "$FW/Resources/Info.plist" <<'P'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0"><dict><key>CFBundleExecutable</key><string>libgodot_riscv.macos.template_release.double.universal</string><key>CFBundleIdentifier</key><string>com.chibifire.libgodot_riscv.macos.template_release.double.universal</string><key>CFBundlePackageType</key><string>FMWK</string><key>CFBundleName</key><string>libgodot_riscv.macos.template_release.double.universal</string><key>CFBundleVersion</key><string>1</string><key>CFBundleShortVersionString</key><string>1</string></dict></plist>
+    P
+      codesign --force --timestamp --options runtime -s "$ID" "$FW"
       codesign --force --timestamp --options runtime --entitlements ent.plist -s "$ID" "stage/#{v.name}.app"
       codesign --verify --deep --strict "stage/#{v.name}.app"
     fi

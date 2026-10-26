@@ -44,7 +44,10 @@ if mm_sets:
     for d in mm_sets:
         for c in sorted(p for p in pathlib.Path(d).iterdir() if p.is_dir()):
             shutil.copy(c / 'transforms.f32', mm / (c.name + '.f32'))
-            keys.append(c.name)
+            if (c / 'phase.f32').exists():
+                shutil.copy(c / 'phase.f32', mm / (c.name + '.phase.f32'))
+            # Same clips.tsv as tools/package_desktop.sh: "<key>\tloop" for a clip cut as a loop.
+            keys.append(c.name + ('\tloop' if (c / 'loop.txt').exists() else ''))
             first = first or c
     (mm / 'clips.tsv').write_text(''.join(k + '\n' for k in keys))
     (mm / 'skeleton.txt').write_text(''.join((first / 'skeleton.txt').read_text().splitlines(True)[3:]))
@@ -162,6 +165,23 @@ def build(p):
 def plain(p):
     r = rel[p]
     return r in PLAIN_FILES or r.startswith(PLAIN_DIRS)
+
+# A plain script that names a class compiled into a guest fails to parse on the web ("Could not
+# find type"): compiled scripts are not global classes for stock GDScript. So every class a plain
+# script names (and what those name in turn) stays plain too.
+def strip_comments(s):
+    return re.sub(r'#[^\n]*', '', s)
+
+grew = True
+while grew:
+    grew = False
+    for p in [q for q in files if plain(q)]:
+        body = strip_comments(srcs[p])
+        for n, q in classes.items():
+            if q != p and not plain(q) and re.search(r'\b%s\b' % re.escape(n), body):
+                PLAIN_FILES.add(rel[q])
+                print('PLAIN-BY-USE', rel[q], 'named in', rel[p])
+                grew = True
 
 compiled = [p for p in files if not plain(p)]
 # The export leaves out every compiled script's source, and keeps the plain ones.

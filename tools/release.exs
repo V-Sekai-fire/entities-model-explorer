@@ -49,7 +49,8 @@ defmodule Release do
   @sign_id "Developer ID Application: Ernest Lee (F48WQK5Y2R)"
   @viewers [
     %{key: "walk-mode", app: "walk-mode-viewer", name: "Walk Mode Viewer",
-      repo: "chibifire/interactor-walk-mode-viewer", space: "chibifire/walk-mode", rig: false, mac_zip: false, web: true}
+      repo: "chibifire/interactor-walk-mode-viewer", space: "chibifire/walk-mode", rig: false, mac_zip: false,
+      web: true, web_space: "chibifire/walk-mode-web"}
   ]
   @elfs ~w(skintokens.elf usd.elf motion.elf headfit.elf mm.elf mujoco.elf)
   @weights ~w(mesh-encoder.gguf skin-vae.gguf tokenrig.gguf)
@@ -1073,9 +1074,10 @@ defmodule Release do
 
   # ---- helpers -------------------------------------------------------------------------------
 
-  # Publishing to main also brings the viewer's Space up to date: each download card on its
-  # index.html gets the new SHA-256 and size, and a viewer with `web: true` gets this release's
-  # web viewer as godot/. Dev publishes leave the Spaces alone (they link main).
+  # Publishing to main also brings the viewer's Spaces up to date: each download card on the
+  # desktop Space's index.html gets the new SHA-256 and size, and a viewer with `web: true` gets
+  # this release's web viewer as godot/ on its own `web_space` (operator: the WebGPU build never
+  # sits on the Space with the desktop downloads). Dev publishes leave the Spaces alone.
   defp space_update(ctx, v, o, gate, tok) do
     sd = Path.join([ctx.dir, "space", v.key])
     web = Path.join([ctx.dir, "web", "out"])
@@ -1085,11 +1087,29 @@ defmodule Release do
          {:ok, html} <- File.read(Path.join(sd, "index.html")),
          {:ok, html} <- cards(html, o, archives(v)),
          :ok <- File.write(Path.join(sd, "index.html"), html),
-         {:ok, godot} <- (if v.web, do: copy_web(web, Path.join(sd, "godot")), else: {:ok, []}),
-         env = [{"HF_UPLOAD_TOKEN", tok}, {"REVISION", ""}, {"MSG", "Release #{ctx.id}"}],
-         {:ok, out} <- cap("sh", ["-c", "cd \"$1\" && shift && printf '%s' \"$HF_UPLOAD_TOKEN\" | python \"$@\"", "sh", sd, gate, "push", v.space, "space", "." | ["index.html" | godot]], env),
-         true <- String.contains?(out, "live matches") || {:error, "Space #{v.space}: #{tail(out)}"} do
-      IO.puts("  Space #{v.space}: index.html#{if v.web, do: " + godot/ (#{length(godot)} files)", else: ""}")
+         :ok <- space_push(sd, gate, tok, ctx, v.space, ["index.html"]),
+         :ok <- (if v.web, do: web_update(ctx, v, web, gate, tok), else: :ok) do
+      :ok
+    end
+  end
+
+  defp web_update(ctx, v, web, gate, tok) do
+    wd = Path.join([ctx.dir, "space", v.key <> "-web"])
+
+    with true <- is_binary(Map.get(v, :web_space)) || {:error, "#{v.key}: web: true needs a web_space"},
+         true <- v.web_space != v.space || {:error, "#{v.key}: web_space must not be the desktop Space"},
+         :ok <- clean(wd),
+         {:ok, godot} <- copy_web(web, Path.join(wd, "godot")) do
+      space_push(wd, gate, tok, ctx, v.web_space, godot)
+    end
+  end
+
+  defp space_push(dir, gate, tok, ctx, space, files) do
+    env = [{"HF_UPLOAD_TOKEN", tok}, {"REVISION", ""}, {"MSG", "Release #{ctx.id}"}]
+
+    with {:ok, out} <- cap("sh", ["-c", "cd \"$1\" && shift && printf '%s' \"$HF_UPLOAD_TOKEN\" | python \"$@\"", "sh", dir, gate, "push", space, "space", "." | files], env),
+         true <- String.contains?(out, "live matches") || {:error, "Space #{space}: #{tail(out)}"} do
+      IO.puts("  Space #{space}: #{length(files)} file(s)")
       :ok
     end
   end

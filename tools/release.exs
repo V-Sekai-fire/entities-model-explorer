@@ -7,6 +7,7 @@
 #                                             No arguments are needed; nothing is uploaded
 #   pixi run release --publish dev            upload the staged run to branch dev of the repo
 #   pixi run release --publish main           upload to main instead (the Spaces link main)
+#   pixi run release --viewer <key>           publish only that viewer (repeat for more; default all)
 #   pixi run release --desk                   refuses: the Windows desk is blocklisted
 #   pixi run release --ref <model-explorer ref>   default $RELEASE_REF, else origin/main
 #   pixi run release --resume <dir>           continue a stopped run; finished steps are skipped
@@ -94,7 +95,7 @@ defmodule Release do
 
   defp run(argv) do
     {opts, _, bad} =
-      OptionParser.parse(argv, strict: [desk: :boolean, publish: :string, ref: :string, resume: :string, until: :string, skip: :keep, branch: :keep])
+      OptionParser.parse(argv, strict: [desk: :boolean, publish: :string, ref: :string, resume: :string, until: :string, skip: :keep, branch: :keep, viewer: :keep])
 
     with :ok <- if(opts[:desk], do: {:error, "--desk refuses: the Windows desk is blocklisted, the release runs on this Mac"}, else: :ok),
          :ok <- if(bad == [], do: :ok, else: {:error, "unknown options #{inspect(bad)}"}),
@@ -102,20 +103,22 @@ defmodule Release do
          publish = opts[:publish] || "none",
          :ok <- if(publish in ~w(none dev main), do: :ok, else: {:error, "--publish is none, dev or main"}),
          skip = Keyword.get_values(opts, :skip),
+         only = Keyword.get_values(opts, :viewer),
+         :ok <- if(Enum.all?(only, &(&1 in Enum.map(@viewers, fn v -> v.key end))), do: :ok, else: {:error, "--viewer is one of #{Enum.map_join(@viewers, " ", & &1.key)}"}),
          :ok <- if(Enum.all?(skip, &(&1 in @steps)), do: :ok, else: {:error, "--skip is one of #{Enum.join(@steps, " ")}"}),
          :ok <- if(skip == [] or publish == "none", do: :ok, else: {:error, "--skip leaves the release incomplete: it cannot be published"}),
          until = opts[:until] || List.last(@steps),
          :ok <- if(until in @steps, do: :ok, else: {:error, "--until is one of #{Enum.join(@steps, " ")}"}),
          dir = opts[:resume] || Path.join(release_root(root), stamp()),
          :ok <- File.mkdir_p(Path.join(dir, ".done")) do
-      ctx = %{root: root, dir: dir, publish: publish, ref: opts[:ref] || System.get_env("RELEASE_REF") || "origin/main", id: Path.basename(dir), skip: skip,
+      ctx = %{root: root, dir: dir, publish: publish, ref: opts[:ref] || System.get_env("RELEASE_REF") || "origin/main", id: Path.basename(dir), skip: skip, only: only,
               branches: Map.new(Keyword.get_values(opts, :branch), &List.to_tuple(String.split(&1, "=", parts: 2)))}
       IO.puts("release #{ctx.id} in #{dir} (publish: #{publish})")
       steps = Enum.take_while(@steps, &(&1 != until)) ++ [until]
 
       Enum.reduce_while(steps, {:ok, dir}, fn step, acc ->
         # Publishing to dev and then to main from the same folder are two different steps.
-        marker = Path.join([dir, ".done", if(step == "publish", do: "publish-" <> publish, else: step)])
+        marker = Path.join([dir, ".done", if(step == "publish", do: Enum.join(["publish", publish | Enum.sort(only)], "-"), else: step)])
 
         cond do
           step in skip ->
@@ -1065,7 +1068,8 @@ defmodule Release do
          true <- ctx.publish == "main" or String.contains?(g, "REVISION") ||
                    {:error, "#{gate} cannot commit to a branch (no REVISION): update the checkout"},
          {:ok, tok} <- hf_token() do
-      Enum.reduce_while(@viewers, :ok, fn v, _ ->
+      Enum.filter(@viewers, &(ctx.only == [] or &1.key in ctx.only))
+      |> Enum.reduce_while(:ok, fn v, _ ->
         o = Path.join([ctx.dir, "pck", v.key])
         files = archives(v) ++ ~w(SHA256SUMS LICENSE.md NOTICE CITATION.cff VERSION)
 

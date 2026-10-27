@@ -454,7 +454,9 @@ defmodule Release do
     cd '#{dir}'
     rm -rf unz stage; mkdir unz; (cd unz && unzip -q ../#{zip})
     C="stage/#{v.name}.app/Contents"; mkdir -p "$C/MacOS" "$C/Resources" "$C/Frameworks"
-    cp unz/#{v.app} "$C/MacOS/"; [ ! -d unz/w ] || cp -R unz/w "$C/MacOS/w"
+    cp unz/#{v.app} "$C/MacOS/"
+    # codesign takes every file in MacOS/ for code, so the weights sit in Resources/ behind a link.
+    [ ! -d unz/w ] || { cp -R unz/w "$C/Resources/w"; ln -s ../Resources/w "$C/MacOS/w"; }
     cp unz/#{v.app}.pck unz/LICENSE.md unz/NOTICE unz/CITATION.cff unz/LICENSE-model-explorer.txt "$C/Resources/"
     cp -R unz/libgodot_riscv.macos.template_release.double.universal.framework "$C/Frameworks/"
     cat > "$C/Info.plist" <<'P'

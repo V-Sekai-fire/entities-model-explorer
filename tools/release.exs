@@ -38,9 +38,10 @@
 #   the Linux tar start and report their features; the walk viewer walks three-vrm-girl.vrm
 #   (VRM 0.x, six skins: MOVE-OK) on Windows (Wine) and macOS; the staged folder passes
 #   `shasum -c`, and a planted tampered copy must fail it.
-# Versions are vX.Y.Z-dev.N, then -beta.N, -rc.N and the bare vX.Y.Z. A run takes each viewer's
-# published version (VERSION in its download repo, else the vX.Y.Z-<stage>.N on its Space page) and
-# raises N by one; <dir>/version/<viewer> keeps it, so --resume publishes the same version.
+# Releases are tagged v<YYYYMMDD>-dev.N (RFD66606-2293), then -beta.N, -rc.N and the bare
+# v<YYYYMMDD>; the date is the day the run starts. A run takes each viewer's published tag
+# (VERSION in its download repo, else the tag on its Space page; an older vX.Y.Z-dev.N counts) and
+# raises N by one; <dir>/version/<viewer> keeps it, so --resume publishes the same tag.
 # Tokens come from OpenBao (bao-mint-github, bao-hf-token or bao-env) and never reach argv.
 # Functions return {:ok, value} or {:error, reason}; nothing raises.
 
@@ -1085,7 +1086,8 @@ defmodule Release do
                     {"MSG", "Release #{ver}"}],
              {:ok, out} <- cap("sh", ["-c", "printf '%s' \"$HF_UPLOAD_TOKEN\" | python \"$@\"", "sh", gate, "push", v.repo, "model", o | files], env),
              true <- String.contains?(out, "live matches") || {:error, "#{v.repo}: #{tail(out)}"},
-             :ok <- (if ctx.publish == "main", do: space_update(ctx, v, o, gate, tok, ver), else: :ok) do
+             :ok <- (if ctx.publish == "main", do: space_update(ctx, v, o, gate, tok, ver), else: :ok),
+             :ok <- tag(ctx, v, ver, tok) do
           IO.puts("  #{v.repo}: #{out |> String.split("\n") |> Enum.find("", &String.starts_with?(&1, "commit"))}")
           {:cont, :ok}
         else
@@ -1097,7 +1099,38 @@ defmodule Release do
 
   # ---- helpers -------------------------------------------------------------------------------
 
-  defp version_re, do: ~r/\bv\d+\.\d+\.\d+(-(dev|beta|rc)\.\d+)?/
+  # The tag names the viewer source on GitHub and the uploaded commit in the download repo.
+  defp tag(ctx, v, ver, hf_tok) do
+    rev = if ctx.publish == "main", do: "main", else: ctx.publish
+    py = "import sys,huggingface_hub as h; a=h.HfApi(token=sys.stdin.read().strip()); " <>
+         "t=[x.name for x in a.list_repo_refs(sys.argv[1]).tags]; " <>
+         "sys.argv[2] in t or a.create_tag(sys.argv[1], tag=sys.argv[2], revision=sys.argv[3], tag_message='Release '+sys.argv[2]); print('HF-TAG-OK')"
+
+    with {:ok, sha} <- cap("git", ["-C", Path.join(ctx.dir, "model-explorer"), "rev-parse", "HEAD"]),
+         sha = String.trim(sha),
+         {:ok, gh} <- gh_token("V-Sekai-fire"),
+         :ok <- gh_tag(gh, ver, sha),
+         {:ok, out} <- cap("sh", ["-c", "printf '%s' \"$HF_TAG_TOKEN\" | python -c \"$1\" \"$2\" \"$3\" \"$4\"", "sh", py, v.repo, ver, rev], [{"HF_TAG_TOKEN", hf_tok}]),
+         true <- String.contains?(out, "HF-TAG-OK") || {:error, "#{v.repo}: no tag #{ver}: #{tail(out)}"} do
+      IO.puts("  tag #{ver}: entities-model-explorer #{String.slice(sha, 0, 7)}, #{v.repo} #{rev}")
+      :ok
+    end
+  end
+
+  # An existing tag on the same commit is fine (two viewers share one tag); on another commit it fails.
+  defp gh_tag(gh, ver, sha) do
+    repo = "repos/V-Sekai-fire/entities-model-explorer/git"
+
+    case cap("gh", ["api", "#{repo}/ref/tags/#{ver}", "--jq", ".object.sha"], gh_env(gh)) do
+      {:ok, have} ->
+        if String.trim(have) == sha, do: :ok, else: {:error, "tag #{ver} already names #{String.trim(have)}, not #{sha}"}
+
+      {:error, _} ->
+        with {:ok, _} <- cap("gh", ["api", "#{repo}/refs", "-f", "ref=refs/tags/#{ver}", "-f", "sha=#{sha}"], gh_env(gh)), do: :ok
+    end
+  end
+
+  defp version_re, do: ~r/\bv(\d{8}|\d+\.\d+\.\d+)(-(dev|beta|rc)\.\d+)?\b/
 
   defp version(ctx, v) do
     f = Path.join([ctx.dir, "version", v.key])
@@ -1148,16 +1181,24 @@ defmodule Release do
     end
   end
 
-  # The pre-release number goes up by one; a bare version starts the next patch's dev.1.
+  # Today's date with the stage kept and N raised by one; after a bare tag the next is dev.1.
   defp next_version(cur) do
-    case Regex.run(~r/^v(\d+)\.(\d+)\.(\d+)(?:-(dev|beta|rc)\.(\d+))?$/, cur) do
-      [_, x, y, z, stage, n] -> {:ok, "v#{x}.#{y}.#{z}-#{stage}.#{String.to_integer(n) + 1}"}
-      [_, x, y, z] -> {:ok, "v#{x}.#{y}.#{String.to_integer(z) + 1}-dev.1"}
-      _ -> {:error, "cannot read the version #{inspect(cur)}"}
+    day = Calendar.strftime(NaiveDateTime.local_now(), "%Y%m%d")
+
+    case Regex.run(~r/^v(?:\d{8}|\d+\.\d+\.\d+)(?:-(dev|beta|rc)\.(\d+))?$/, cur) do
+      [_, stage, n] -> {:ok, "v#{day}-#{stage}.#{String.to_integer(n) + 1}"}
+      [_] -> {:ok, "v#{day}-dev.1"}
+      _ -> {:error, "cannot read the tag #{inspect(cur)}"}
     end
   end
 
-  defp short_version(ver), do: ver |> String.trim_leading("v") |> String.split("-") |> hd()
+  # macOS wants dotted numbers: v20261026-dev.2 is 2026.10.26.
+  defp short_version(ver) do
+    case Regex.run(~r/^v(\d{4})(\d{2})(\d{2})/, ver) do
+      [_, y, m, d] -> "#{y}.#{String.to_integer(m)}.#{String.to_integer(d)}"
+      _ -> ver |> String.trim_leading("v") |> String.split("-") |> hd()
+    end
+  end
 
   # Publishing to main also brings the viewer's Spaces up to date: each download card on the
   # desktop Space's index.html gets the new SHA-256 and size, and a viewer with `web: true` gets

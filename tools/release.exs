@@ -1101,20 +1101,28 @@ defmodule Release do
 
   # ---- helpers -------------------------------------------------------------------------------
 
-  # The tag names the viewer source on GitHub and the uploaded commit in the download repo.
-  defp tag(ctx, v, ver, hf_tok) do
+  # The tag is the Go pseudo-version of the model-explorer HEAD commit (RFD66606-2312, gate
+  # check_release_tags.exs): v0.0.0-YYYYMMDDHHMMSS-<12-hex> (UTC commit time + first 12 hex
+  # of the SHA); CalVer is rejected after the 2026-10-13 cutover. The download repo and the
+  # Space kicker still carry the human CalVer version, which stays separate from the tag.
+  defp tag(ctx, v, _ver, hf_tok) do
     rev = if ctx.publish == "main", do: "main", else: ctx.publish
+    dir = Path.join(ctx.dir, "model-explorer")
     py = "import sys,huggingface_hub as h; a=h.HfApi(token=sys.stdin.read().strip()); " <>
          "t=[x.name for x in a.list_repo_refs(sys.argv[1]).tags]; " <>
          "sys.argv[2] in t or a.create_tag(sys.argv[1], tag=sys.argv[2], revision=sys.argv[3], tag_message='Release '+sys.argv[2]); print('HF-TAG-OK')"
 
-    with {:ok, sha} <- cap("git", ["-C", Path.join(ctx.dir, "model-explorer"), "rev-parse", "HEAD"]),
+    with {:ok, sha} <- cap("git", ["-C", dir, "rev-parse", "HEAD"]),
          sha = String.trim(sha),
+         {:ok, utc} <- cap("git", ["-C", dir, "log", "-1", "--format=%cd",
+            "--date=format-local:%Y%m%d%H%M%S", "HEAD"], [{"TZ", "UTC"}]),
+         utc = String.trim(utc),
+         pver = "v0.0.0-#{utc}-#{String.slice(sha, 0, 12)}",
          {:ok, gh} <- gh_token("V-Sekai-fire"),
-         :ok <- gh_tag(gh, ver, sha),
-         {:ok, out} <- cap("sh", ["-c", "printf '%s' \"$HF_TAG_TOKEN\" | python -c \"$1\" \"$2\" \"$3\" \"$4\"", "sh", py, v.repo, ver, rev], [{"HF_TAG_TOKEN", hf_tok}]),
-         true <- String.contains?(out, "HF-TAG-OK") || {:error, "#{v.repo}: no tag #{ver}: #{tail(out)}"} do
-      IO.puts("  tag #{ver}: entities-model-explorer #{String.slice(sha, 0, 7)}, #{v.repo} #{rev}")
+         :ok <- gh_tag(gh, pver, sha),
+         {:ok, out} <- cap("sh", ["-c", "printf '%s' \"$HF_TAG_TOKEN\" | python -c \"$1\" \"$2\" \"$3\" \"$4\"", "sh", py, v.repo, pver, rev], [{"HF_TAG_TOKEN", hf_tok}]),
+         true <- String.contains?(out, "HF-TAG-OK") || {:error, "#{v.repo}: no tag #{pver}: #{tail(out)}"} do
+      IO.puts("  tag #{pver}: entities-model-explorer #{String.slice(sha, 0, 7)}, #{v.repo} #{rev}")
       :ok
     end
   end

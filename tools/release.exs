@@ -1,11 +1,13 @@
 #!/usr/bin/env elixir
-# Build, test and stage the walk-mode viewer (desktop packages and the web viewer) in one run.
+# Build, test and stage the SkinTokens and walk-mode viewers (desktop packages and the walk-mode web
+# viewer) in one run.
 #
 #   pixi run release                          from the smoke-water root (release.exs is linked
 #                                             there by the manifest); builds, tests and stages.
 #                                             No arguments are needed; nothing is uploaded
 #   pixi run release --publish dev            upload the staged run to branch dev of the repo
 #   pixi run release --publish main           upload to main instead (the Spaces link main)
+#   pixi run release --viewer <key>           publish only that viewer (repeat for more; default all)
 #   pixi run release --desk                   refuses: the Windows desk is blocklisted
 #   pixi run release --ref <model-explorer ref>   default $RELEASE_REF, else origin/main
 #   pixi run release --resume <dir>           continue a stopped run; finished steps are skipped
@@ -36,6 +38,10 @@
 #   the Linux tar start and report their features; the walk viewer walks three-vrm-girl.vrm
 #   (VRM 0.x, six skins: MOVE-OK) on Windows (Wine) and macOS; the staged folder passes
 #   `shasum -c`, and a planted tampered copy must fail it.
+# Releases are tagged v<YYYYMMDD>-dev.N (RFD66606-2293), then -beta.N, -rc.N and the bare
+# v<YYYYMMDD>; the date is the day the run starts. A run takes each viewer's published tag
+# (VERSION in its download repo, else the tag on its Space page; an older vX.Y.Z-dev.N counts) and
+# raises N by one; <dir>/version/<viewer> keeps it, so --resume publishes the same tag.
 # Tokens come from OpenBao (bao-mint-github, bao-hf-token or bao-env) and never reach argv.
 # Functions return {:ok, value} or {:error, reason}; nothing raises.
 
@@ -48,6 +54,9 @@ defmodule Release do
   # notarized; the test then checks Gatekeeper accepts it.
   @sign_id "Developer ID Application: Ernest Lee (F48WQK5Y2R)"
   @viewers [
+    %{key: "skintokens", app: "skintokens-viewer", name: "SkinTokens Viewer",
+      repo: "chibifire/interactor-skintokens-viewer", space: "chibifire/skintokens-auto-rig", rig: true, mac_zip: false,
+      web: false},
     %{key: "walk-mode", app: "walk-mode-viewer", name: "Walk Mode Viewer",
       repo: "chibifire/interactor-walk-mode-viewer", space: "chibifire/walk-mode", rig: false, mac_zip: false,
       web: true, web_space: "chibifire/walk-mode-web"}
@@ -87,7 +96,7 @@ defmodule Release do
 
   defp run(argv) do
     {opts, _, bad} =
-      OptionParser.parse(argv, strict: [desk: :boolean, publish: :string, ref: :string, resume: :string, until: :string, skip: :keep, branch: :keep])
+      OptionParser.parse(argv, strict: [desk: :boolean, publish: :string, ref: :string, resume: :string, until: :string, skip: :keep, branch: :keep, viewer: :keep])
 
     with :ok <- if(opts[:desk], do: {:error, "--desk refuses: the Windows desk is blocklisted, the release runs on this Mac"}, else: :ok),
          :ok <- if(bad == [], do: :ok, else: {:error, "unknown options #{inspect(bad)}"}),
@@ -95,20 +104,22 @@ defmodule Release do
          publish = opts[:publish] || "none",
          :ok <- if(publish in ~w(none dev main), do: :ok, else: {:error, "--publish is none, dev or main"}),
          skip = Keyword.get_values(opts, :skip),
+         only = Keyword.get_values(opts, :viewer),
+         :ok <- if(Enum.all?(only, &(&1 in Enum.map(@viewers, fn v -> v.key end))), do: :ok, else: {:error, "--viewer is one of #{Enum.map_join(@viewers, " ", & &1.key)}"}),
          :ok <- if(Enum.all?(skip, &(&1 in @steps)), do: :ok, else: {:error, "--skip is one of #{Enum.join(@steps, " ")}"}),
          :ok <- if(skip == [] or publish == "none", do: :ok, else: {:error, "--skip leaves the release incomplete: it cannot be published"}),
          until = opts[:until] || List.last(@steps),
          :ok <- if(until in @steps, do: :ok, else: {:error, "--until is one of #{Enum.join(@steps, " ")}"}),
          dir = opts[:resume] || Path.join(release_root(root), stamp()),
          :ok <- File.mkdir_p(Path.join(dir, ".done")) do
-      ctx = %{root: root, dir: dir, publish: publish, ref: opts[:ref] || System.get_env("RELEASE_REF") || "origin/main", id: Path.basename(dir), skip: skip,
+      ctx = %{root: root, dir: dir, publish: publish, ref: opts[:ref] || System.get_env("RELEASE_REF") || "origin/main", id: Path.basename(dir), skip: skip, only: only,
               branches: Map.new(Keyword.get_values(opts, :branch), &List.to_tuple(String.split(&1, "=", parts: 2)))}
       IO.puts("release #{ctx.id} in #{dir} (publish: #{publish})")
       steps = Enum.take_while(@steps, &(&1 != until)) ++ [until]
 
       Enum.reduce_while(steps, {:ok, dir}, fn step, acc ->
         # Publishing to dev and then to main from the same folder are two different steps.
-        marker = Path.join([dir, ".done", if(step == "publish", do: "publish-" <> publish, else: step)])
+        marker = Path.join([dir, ".done", if(step == "publish", do: Enum.join(["publish", publish | Enum.sort(only)], "-"), else: step)])
 
         cond do
           step in skip ->
@@ -315,6 +326,13 @@ defmodule Release do
          {:ok, pkg} <- File.read(Path.join(src, "tools/package_desktop.sh")),
          true <- String.contains?(pkg, "walk-mode)") || {:error, "#{ctx.ref} predates the walk-mode package (tools/package_desktop.sh)"} do
       source(ctx, "viewer source V-Sekai-fire/entities-model-explorer #{sha} (#{ctx.ref})")
+
+      Enum.reduce_while(@viewers, :ok, fn v, _ ->
+        case version(ctx, v) do
+          {:ok, ver} -> source(ctx, "version #{v.key} #{ver}"); {:cont, :ok}
+          e -> {:halt, e}
+        end
+      end)
     end
   end
 
@@ -394,7 +412,8 @@ defmodule Release do
 
       with :ok <- clean(m),
            {:ok, _} <- File.copy(Path.join(o, zip), Path.join(m, zip)),
-           {:ok, out} <- mac(ctx, dmg_script(v, m, zip, dmg, ctx.id)),
+           {:ok, ver} <- version(ctx, v),
+           {:ok, out} <- mac(ctx, dmg_script(v, m, zip, dmg, ctx.id, ver)),
            {:ok, _} <- File.copy(Path.join(m, dmg), Path.join(o, dmg)),
            :ok <- sums(o, v) do
         IO.puts("  macos #{v.key}: #{tail(out)}")
@@ -429,13 +448,15 @@ defmodule Release do
   # The image is signed with the Developer ID and notarized only when this Mac already holds the
   # release-signing keychain; its password and the notary key come from OpenBao. Without the
   # keychain the image is built unsigned and signed.txt says so. No credential is ever created here.
-  defp dmg_script(v, dir, zip, dmg, id) do
+  defp dmg_script(v, dir, zip, dmg, id, ver) do
     """
     set -eu
     cd '#{dir}'
     rm -rf unz stage; mkdir unz; (cd unz && unzip -q ../#{zip})
     C="stage/#{v.name}.app/Contents"; mkdir -p "$C/MacOS" "$C/Resources" "$C/Frameworks"
-    cp unz/#{v.app} "$C/MacOS/"; [ ! -d unz/w ] || cp -R unz/w "$C/MacOS/w"
+    cp unz/#{v.app} "$C/MacOS/"
+    # codesign takes every file in MacOS/ for code, so the weights sit in Resources/ behind a link.
+    [ ! -d unz/w ] || { cp -R unz/w "$C/Resources/w"; ln -s ../Resources/w "$C/MacOS/w"; }
     cp unz/#{v.app}.pck unz/LICENSE.md unz/NOTICE unz/CITATION.cff unz/LICENSE-model-explorer.txt "$C/Resources/"
     cp -R unz/libgodot_riscv.macos.template_release.double.universal.framework "$C/Frameworks/"
     cat > "$C/Info.plist" <<'P'
@@ -446,7 +467,7 @@ defmodule Release do
     <key>CFBundleIdentifier</key><string>com.chibifire.#{v.app}</string>
     <key>CFBundleName</key><string>#{v.name}</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>#{id}</string>
+    <key>CFBundleShortVersionString</key><string>#{short_version(ver)}</string>
     <key>CFBundleVersion</key><string>#{id}</string>
     <key>LSMinimumSystemVersion</key><string>11.0</string>
     <key>NSHighResolutionCapable</key><true/>
@@ -949,6 +970,8 @@ defmodule Release do
 
       with :ok <- clean(t),
            :ok <- copy_all(keep, o, t),
+           {:ok, ver} <- version(ctx, v),
+           :ok <- File.write(Path.join(t, "VERSION"), ver <> "\n"),
            :ok <- copy_all(~w(LICENSE.md NOTICE CITATION.cff), Path.join([ctx.dir, "notices", v.key]), t),
            :ok <- copy_all(Enum.filter(~w(SOURCES.txt LOAD.txt), &File.exists?(Path.join(ctx.dir, &1))), ctx.dir, t),
            :ok <- copy_all(Path.wildcard(Path.join(ctx.dir, "test-linux/#{v.key}/UNTESTED.txt")) |> Enum.map(&Path.basename/1), Path.join([ctx.dir, "test-linux", v.key]), t),
@@ -1048,21 +1071,25 @@ defmodule Release do
          true <- ctx.publish == "main" or String.contains?(g, "REVISION") ||
                    {:error, "#{gate} cannot commit to a branch (no REVISION): update the checkout"},
          {:ok, tok} <- hf_token() do
-      Enum.reduce_while(@viewers, :ok, fn v, _ ->
+      Enum.filter(@viewers, &(ctx.only == [] or &1.key in ctx.only))
+      |> Enum.reduce_while(:ok, fn v, _ ->
         o = Path.join([ctx.dir, "pck", v.key])
-        files = archives(v) ++ ~w(SHA256SUMS LICENSE.md NOTICE CITATION.cff)
+        files = archives(v) ++ ~w(SHA256SUMS LICENSE.md NOTICE CITATION.cff VERSION)
 
-        with :ok <- Enum.reduce_while(~w(LICENSE.md NOTICE CITATION.cff), :ok, fn f, _ ->
+        with {:ok, ver} <- version(ctx, v),
+             :ok <- File.write(Path.join(o, "VERSION"), ver <> "\n"),
+             :ok <- Enum.reduce_while(~w(LICENSE.md NOTICE CITATION.cff), :ok, fn f, _ ->
                case File.copy(Path.join([ctx.dir, "notices", v.key, f]), Path.join(o, f)) do
                  {:ok, _} -> {:cont, :ok}
                  e -> {:halt, e}
                end
              end),
              env = [{"HF_UPLOAD_TOKEN", tok}, {"REVISION", if(ctx.publish == "main", do: "", else: ctx.publish)},
-                    {"MSG", "Release #{ctx.id}"}],
+                    {"MSG", "Release #{ver}"}],
              {:ok, out} <- cap("sh", ["-c", "printf '%s' \"$HF_UPLOAD_TOKEN\" | python \"$@\"", "sh", gate, "push", v.repo, "model", o | files], env),
              true <- String.contains?(out, "live matches") || {:error, "#{v.repo}: #{tail(out)}"},
-             :ok <- (if ctx.publish == "main", do: space_update(ctx, v, o, gate, tok), else: :ok) do
+             :ok <- (if ctx.publish == "main", do: space_update(ctx, v, o, gate, tok, ver), else: :ok),
+             :ok <- tag(ctx, v, ver, tok) do
           IO.puts("  #{v.repo}: #{out |> String.split("\n") |> Enum.find("", &String.starts_with?(&1, "commit"))}")
           {:cont, :ok}
         else
@@ -1074,11 +1101,120 @@ defmodule Release do
 
   # ---- helpers -------------------------------------------------------------------------------
 
+  # The tag is the Go pseudo-version of the model-explorer HEAD commit (RFD66606-2312, gate
+  # check_release_tags.exs): v0.0.0-YYYYMMDDHHMMSS-<12-hex> (UTC commit time + first 12 hex
+  # of the SHA); CalVer is rejected after the 2026-10-13 cutover. The download repo and the
+  # Space kicker still carry the human CalVer version, which stays separate from the tag.
+  defp tag(ctx, v, _ver, hf_tok) do
+    rev = if ctx.publish == "main", do: "main", else: ctx.publish
+    dir = Path.join(ctx.dir, "model-explorer")
+    py = "import sys,huggingface_hub as h; a=h.HfApi(token=sys.stdin.read().strip()); " <>
+         "t=[x.name for x in a.list_repo_refs(sys.argv[1]).tags]; " <>
+         "sys.argv[2] in t or a.create_tag(sys.argv[1], tag=sys.argv[2], revision=sys.argv[3], tag_message='Release '+sys.argv[2]); print('HF-TAG-OK')"
+
+    with {:ok, sha} <- cap("git", ["-C", dir, "rev-parse", "HEAD"]),
+         sha = String.trim(sha),
+         {:ok, utc} <- cap("git", ["-C", dir, "log", "-1", "--format=%cd",
+            "--date=format-local:%Y%m%d%H%M%S", "HEAD"], [{"TZ", "UTC"}]),
+         utc = String.trim(utc),
+         pver = "v0.0.0-#{utc}-#{String.slice(sha, 0, 12)}",
+         {:ok, gh} <- gh_token("V-Sekai-fire"),
+         :ok <- gh_tag(gh, pver, sha),
+         {:ok, out} <- cap("sh", ["-c", "printf '%s' \"$HF_TAG_TOKEN\" | python -c \"$1\" \"$2\" \"$3\" \"$4\"", "sh", py, v.repo, pver, rev], [{"HF_TAG_TOKEN", hf_tok}]),
+         true <- String.contains?(out, "HF-TAG-OK") || {:error, "#{v.repo}: no tag #{pver}: #{tail(out)}"} do
+      IO.puts("  tag #{pver}: entities-model-explorer #{String.slice(sha, 0, 7)}, #{v.repo} #{rev}")
+      :ok
+    end
+  end
+
+  # An existing tag on the same commit is fine (two viewers share one tag); on another commit it fails.
+  defp gh_tag(gh, ver, sha) do
+    repo = "repos/V-Sekai-fire/entities-model-explorer/git"
+
+    case cap("gh", ["api", "#{repo}/ref/tags/#{ver}", "--jq", ".object.sha"], gh_env(gh)) do
+      {:ok, have} ->
+        if String.trim(have) == sha, do: :ok, else: {:error, "tag #{ver} already names #{String.trim(have)}, not #{sha}"}
+
+      {:error, _} ->
+        with {:ok, _} <- cap("gh", ["api", "#{repo}/refs", "-f", "ref=refs/tags/#{ver}", "-f", "sha=#{sha}"], gh_env(gh)), do: :ok
+    end
+  end
+
+  defp version_re, do: ~r/\bv(\d{8}|\d+\.\d+\.\d+)(-(dev|beta|rc)\.\d+)?\b/
+
+  defp version(ctx, v) do
+    f = Path.join([ctx.dir, "version", v.key])
+
+    case File.read(f) do
+      {:ok, s} ->
+        {:ok, String.trim(s)}
+
+      _ ->
+        with {:ok, tok} <- hf_token(),
+             {:ok, cur} <- published_version(ctx, tok, v),
+             {:ok, next} <- next_version(cur),
+             :ok <- File.mkdir_p(Path.dirname(f)),
+             :ok <- File.write(f, next <> "\n") do
+          IO.puts("  #{v.key}: published #{cur}, this release #{next}")
+          {:ok, next}
+        end
+    end
+  end
+
+  # VERSION in the download repo wins; a repo without one falls back to the Space page's version.
+  defp published_version(ctx, tok, v) do
+    d = Path.join([ctx.dir, "version", "published-" <> v.key])
+
+    with :ok <- clean(d) do
+      from_repo =
+        with {:ok, p} <- hf_get(tok, v.repo, "VERSION", Path.join(d, "VERSION")),
+             {:ok, s} <- File.read(p),
+             [m | _] <- Regex.run(version_re(), s) do
+          m
+        else
+          _ -> nil
+        end
+
+      from_space =
+        with {:ok, p} <- hf_get(tok, "spaces/" <> v.space, "index.html", Path.join(d, "index.html")),
+             {:ok, s} <- File.read(p),
+             [m | _] <- Regex.run(version_re(), s) do
+          m
+        else
+          _ -> nil
+        end
+
+      case from_repo || from_space do
+        nil -> {:error, "#{v.key}: no published version in #{v.repo}/VERSION or on #{v.space}; publish one by hand first"}
+        m -> {:ok, m}
+      end
+    end
+  end
+
+  # Today's date with the stage kept and N raised by one; after a bare tag the next is dev.1.
+  defp next_version(cur) do
+    day = Calendar.strftime(NaiveDateTime.local_now(), "%Y%m%d")
+
+    case Regex.run(~r/^v(?:\d{8}|\d+\.\d+\.\d+)(?:-(dev|beta|rc)\.(\d+))?$/, cur) do
+      [_, stage, n] -> {:ok, "v#{day}-#{stage}.#{String.to_integer(n) + 1}"}
+      [_] -> {:ok, "v#{day}-dev.1"}
+      _ -> {:error, "cannot read the tag #{inspect(cur)}"}
+    end
+  end
+
+  # macOS wants dotted numbers: v20261026-dev.2 is 2026.10.26.
+  defp short_version(ver) do
+    case Regex.run(~r/^v(\d{4})(\d{2})(\d{2})/, ver) do
+      [_, y, m, d] -> "#{y}.#{String.to_integer(m)}.#{String.to_integer(d)}"
+      _ -> ver |> String.trim_leading("v") |> String.split("-") |> hd()
+    end
+  end
+
   # Publishing to main also brings the viewer's Spaces up to date: each download card on the
   # desktop Space's index.html gets the new SHA-256 and size, and a viewer with `web: true` gets
   # this release's web viewer as godot/ on its own `web_space` (operator: the WebGPU build never
   # sits on the Space with the desktop downloads). Dev publishes leave the Spaces alone.
-  defp space_update(ctx, v, o, gate, tok) do
+  defp space_update(ctx, v, o, gate, tok, ver) do
     sd = Path.join([ctx.dir, "space", v.key])
     web = Path.join([ctx.dir, "web", "out"])
 
@@ -1086,8 +1222,9 @@ defmodule Release do
          {:ok, _} <- hf_get(tok, "spaces/" <> v.space, "index.html", Path.join(sd, "index.html")),
          {:ok, html} <- File.read(Path.join(sd, "index.html")),
          {:ok, html} <- cards(html, o, archives(v)),
+         html = String.replace(html, version_re(), ver),
          :ok <- File.write(Path.join(sd, "index.html"), html),
-         :ok <- space_push(sd, gate, tok, ctx, v.space, ["index.html"]),
+         :ok <- space_push(sd, gate, tok, %{ctx | id: ver}, v.space, ["index.html"]),
          :ok <- (if v.web, do: web_update(ctx, v, web, gate, tok), else: :ok) do
       :ok
     end
@@ -1105,6 +1242,7 @@ defmodule Release do
   end
 
   defp space_push(dir, gate, tok, ctx, space, files) do
+    # ctx.id is the version on a Space update and the run id elsewhere.
     env = [{"HF_UPLOAD_TOKEN", tok}, {"REVISION", ""}, {"MSG", "Release #{ctx.id}"}]
 
     with {:ok, out} <- cap("sh", ["-c", "cd \"$1\" && shift && printf '%s' \"$HF_UPLOAD_TOKEN\" | python \"$@\"", "sh", dir, gate, "push", space, "space", "." | files], env),

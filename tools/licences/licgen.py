@@ -266,7 +266,7 @@ def refs_table():
     soft("MuJoCo", GH + "google-deepmind/mujoco", "Apache-2.0", "3.14.0 at 53197e6, inside mujoco.elf.",
          ["Google DeepMind"])
     soft("libccd", GH + "danfis/libccd", "BSD-3-Clause", "Inside mujoco.elf.", ["Daniel Fiser"])
-    soft("Qhull", "http://www.qhull.org", "LicenseRef-Qhull", "Inside mujoco.elf.", ["C.B. Barber", "The Geometry Center"])
+    soft("Qhull", "http://www.qhull.org", "Qhull", "Inside mujoco.elf.", ["C.B. Barber", "The Geometry Center"])
     soft("TinyXML-2", GH + "leethomason/tinyxml2", "Zlib", "Inside mujoco.elf.", ["Lee Thomason"])
     soft("tinyobjloader", GH + "tinyobjloader/tinyobjloader", "MIT", "Inside mujoco.elf.", ["Syoyo Fujita"])
     soft("miniz", GH + "richgel999/miniz", "MIT", "Inside mujoco.elf.", ["Rich Geldreich", "RAD Game Tools", "Valve Software"])

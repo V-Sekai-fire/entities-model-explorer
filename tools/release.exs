@@ -709,16 +709,16 @@ defmodule Release do
 
   def step_web(ctx) do
     cache = cache_dir()
-    d = Path.join(ctx.dir, "web")
+    d = Path.expand(Path.join(ctx.dir, "web"))
     mmg = Path.join([ctx.dir, "elf", "mmg", "data"])
+    env = [{"MM_DATA", Path.join(mmg, "kimodo-locomotion") <> ":" <> Path.join(mmg, "o3de-motionmatching")}]
 
     with :ok <- File.mkdir_p(cache),
          :ok <- clean(d),
          {:ok, tok} <- gh_token("V-Sekai-fire"),
          {:ok, run} <- sandbox_run(ctx),
          {:ok, _} <- cap("gh", ["run", "download", run, "-R", "V-Sekai-fire/godot-sandbox", "-n", "godot-sandbox-web-wasm32-double", "-D", Path.join(d, "sandbox-web")], gh_env(tok)),
-         {:ok, log} <- cap("bash", ["-c", web_script(), "web", ctx.root, cache, d, ctx.dir, @emsdk_version, Enum.join(@web_elfs, " ")],
-                           [{"MM_DATA", Path.join(mmg, "kimodo-locomotion") <> ":" <> Path.join(mmg, "o3de-motionmatching")}]),
+         {:ok, log} <- cap("bash", ["-c", web_script(), "web", ctx.root, cache, d, ctx.dir, @emsdk_version, Enum.join(@web_elfs, " ")], env),
          true <- String.contains?(log, "WEB-OK") || {:error, "web build printed no WEB-OK: #{tail(log)}"},
          [_, gsha, csha] <- Regex.run(~r/WEB-OK godot (\w+) compiler (\w+)/, log) || {:error, "no commits in the web log"},
          out = Path.join(d, "out"),
@@ -966,7 +966,7 @@ defmodule Release do
     Enum.reduce_while(@viewers, :ok, fn v, _ ->
       o = Path.join([ctx.dir, "pck", v.key])
       t = Path.join(dest, v.key)
-      keep = archives(v) ++ ~w(SHA256SUMS)
+      keep = archives(v)
 
       with :ok <- clean(t),
            :ok <- copy_all(keep, o, t),
@@ -978,6 +978,7 @@ defmodule Release do
            :ok <- (if ctx.skip == [], do: :ok, else: File.write(Path.join(t, "INCOMPLETE.txt"), "skipped by --skip: #{Enum.join(ctx.skip, " ")}\n")),
            {:ok, _} <- File.cp_r(Path.join(ctx.dir, ".done"), Path.join(t, ".done")) |> cp_ok(),
            :ok <- (if v.web, do: stage_web(ctx, t), else: :ok),
+           :ok <- stage_checksums(t, archives(v)),
            :ok <- check_sums(t, archives(v)),
            :ok <- control("staged archives", t, archives(v)) do
         IO.puts("  staged #{t}")
@@ -994,6 +995,16 @@ defmodule Release do
   defp stage_web(ctx, t) do
     src = Path.join([ctx.dir, "web", "out"])
     if File.exists?(Path.join(ctx.dir, ".done/web")) and File.dir?(src), do: (with {:ok, _} <- File.cp_r(src, Path.join(t, "godot")) |> cp_ok(), do: :ok), else: :ok
+  end
+
+  defp stage_checksums(t, archives) do
+    files = archives |> Enum.join(" ")
+    {_, code} = System.cmd("sh", ["-c", "cd \"#{t}\" && shasum -a 256 #{files} > SHA256SUMS"], [])
+    if code == 0 do
+      :ok
+    else
+      {:error, "cannot shasum staged archives in #{t} (sh exited #{code})"}
+    end
   end
 
   defp copy_all(names, from, to) do
@@ -1068,6 +1079,7 @@ defmodule Release do
          :ok <- clean(gd),
          {:ok, _} <- cap("sh", ["-c", "git -C \"$1\" archive FETCH_HEAD tools | tar -x -C \"$2\"", "sh", q, gd]),
          {:ok, g} <- File.read(gate),
+         gate_abs = Path.expand(gate),
          true <- ctx.publish == "main" or String.contains?(g, "REVISION") ||
                    {:error, "#{gate} cannot commit to a branch (no REVISION): update the checkout"},
          {:ok, tok} <- hf_token() do
@@ -1088,7 +1100,7 @@ defmodule Release do
                     {"MSG", "Release #{ver}"}],
              {:ok, out} <- cap("sh", ["-c", "printf '%s' \"$HF_UPLOAD_TOKEN\" | python \"$@\"", "sh", gate, "push", v.repo, "model", o | files], env),
              true <- String.contains?(out, "live matches") || {:error, "#{v.repo}: #{tail(out)}"},
-             :ok <- (if ctx.publish == "main", do: space_update(ctx, v, o, gate, tok, ver), else: :ok),
+             :ok <- (if ctx.publish == "main", do: space_update(ctx, v, o, gate_abs, tok, ver), else: :ok),
              :ok <- tag(ctx, v, ver, tok) do
           IO.puts("  #{v.repo}: #{out |> String.split("\n") |> Enum.find("", &String.starts_with?(&1, "commit"))}")
           {:cont, :ok}

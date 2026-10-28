@@ -11,6 +11,7 @@ part's own repository; src/old-citations.yaml holds the reference entries of the
 CITATION.cff files as first published. Upload the three files to each HF repo, then give that
 folder to `package_desktop.sh package` as NOTICES. Change a part here, never in the HF repos.
 """
+import datetime
 import os
 import sys
 
@@ -222,7 +223,7 @@ def citation(v, refs):
         "message": "If you use these files, please cite them and the upstream sources listed under `references`.",
         "type": "software", "authors": [FIRE],
         "license-url": f"https://huggingface.co/{v['repo']}/blob/main/LICENSE.md",
-        "url": f"https://huggingface.co/{v['repo']}", "date-released": "2026-10-19",
+        "url": f"https://huggingface.co/{v['repo']}", "date-released": datetime.date.today().isoformat(),
         "references": [refs[w] for w in want],
     }
 
@@ -266,7 +267,7 @@ def refs_table():
     soft("MuJoCo", GH + "google-deepmind/mujoco", "Apache-2.0", "3.14.0 at 53197e6, inside mujoco.elf.",
          ["Google DeepMind"])
     soft("libccd", GH + "danfis/libccd", "BSD-3-Clause", "Inside mujoco.elf.", ["Daniel Fiser"])
-    soft("Qhull", "http://www.qhull.org", "LicenseRef-Qhull", "Inside mujoco.elf.", ["C.B. Barber", "The Geometry Center"])
+    soft("Qhull", "http://www.qhull.org", "Qhull", "Inside mujoco.elf.", ["C.B. Barber", "The Geometry Center"])
     soft("TinyXML-2", GH + "leethomason/tinyxml2", "Zlib", "Inside mujoco.elf.", ["Lee Thomason"])
     soft("tinyobjloader", GH + "tinyobjloader/tinyobjloader", "MIT", "Inside mujoco.elf.", ["Syoyo Fujita"])
     soft("miniz", GH + "richgel999/miniz", "MIT", "Inside mujoco.elf.", ["Rich Geldreich", "RAD Game Tools", "Valve Software"])

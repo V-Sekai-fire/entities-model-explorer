@@ -1,7 +1,7 @@
 """Drive the desktop viewer through its MCP server with the official MCP Python SDK: list the
 trimmed tools, open a model, auto-rig it, take the result back and a screenshot.
 
-    pixi exec -s python=3.12 -s "mcp>=2.3" python tools/mcp_check.py <godot> <model.glb> [--stdio]
+    pixi exec -s python=3.12 -s "mcp>=2.3" python tools/mcp_check.py <godot> <model.glb>
 
 <godot> runs this project (the editor binary with --path, or an exported viewer). The rig needs
 the weights in `w`, skintokens.elf and the godot-sandbox library, as the R key does. Exits 1 on
@@ -17,7 +17,6 @@ import sys
 import time
 from pathlib import Path
 
-from mcp import StdioServerParameters
 from mcp.client.client import Client
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -82,29 +81,22 @@ def free_port():
 
 async def main():
     godot, model = sys.argv[1], Path(sys.argv[2]).resolve()
-    stdio = "--stdio" in sys.argv
     base = [godot, "--path", str(ROOT)]
-    if stdio:
-        target = StdioServerParameters(command=godot, args=[*base[1:], "--quiet", "--", "--mcp-stdio"])
-        async with Client(target, mode="auto") as client:
-            check(client.session.protocol_version == "2026-07-28", f"stdio: {client.session.protocol_version}")
+    port = free_port()
+    proc = subprocess.Popen([*base, "--", f"--mcp-port={port}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(240):
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                break
+            except OSError:
+                time.sleep(0.5)
+        async with Client(f"http://127.0.0.1:{port}/mcp", mode="auto", read_timeout_seconds=1800) as client:
+            check(client.session.protocol_version == "2026-07-28", f"http: {client.session.protocol_version}")
             await run(client, model)
-    else:
-        port = free_port()
-        proc = subprocess.Popen([*base, "--", f"--mcp-port={port}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        try:
-            for _ in range(240):
-                try:
-                    socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
-                    break
-                except OSError:
-                    time.sleep(0.5)
-            async with Client(f"http://127.0.0.1:{port}/mcp", mode="auto", read_timeout_seconds=1800) as client:
-                check(client.session.protocol_version == "2026-07-28", f"http: {client.session.protocol_version}")
-                await run(client, model)
-        finally:
-            proc.terminate()
-            proc.wait(timeout=30)
+    finally:
+        proc.terminate()
+        proc.wait(timeout=30)
     print(f"\n[mcp_check] {len(failures)} failed")
     sys.exit(1 if failures else 0)
 

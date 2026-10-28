@@ -8,9 +8,7 @@ extends Node
 ## One MCPProtocol, every transport the platform has:
 ## - HTTP on 127.0.0.1: streamable HTTP at /mcp and the 2024-11-05 HTTP+SSE pair at /sse and
 ##   /messages, on one port.
-## - stdio with `-- --mcp-stdio` (start the program with --quiet so the banner stays off
-##   standard output). The game quits when the client closes standard input.
-## A web export serves nothing: a page cannot listen, and it has no standard input.
+## A web export serves nothing: a page cannot listen.
 ##
 ## A game trims and extends the tool list in Project Settings, without code:
 ## - vsekai_godot_mcp/allow (PackedStringArray): built-in tools to keep; empty keeps all.
@@ -24,7 +22,6 @@ extends Node
 const MCPCommandsLib = preload("mcp_commands.gd")
 const MCPProtocolLib = preload("mcp_protocol.gd")
 const MCPHttpServerLib = preload("mcp_http_server.gd")
-const MCPStdioLib = preload("mcp_stdio.gd")
 
 const HOST := "127.0.0.1"  # adb forward reaches the device loopback
 const SETTINGS := "vsekai_godot_mcp/"
@@ -51,7 +48,6 @@ static func _resolve_port() -> int:
 var _cmds = MCPCommandsLib.new()
 var protocol = MCPProtocolLib.new()
 var _http = null
-var _stdio = null
 
 
 func _ready() -> void:
@@ -60,11 +56,6 @@ func _ready() -> void:
 	if OS.has_feature("web"):
 		return
 	_start_http()
-	if "--mcp-stdio" in OS.get_cmdline_user_args():
-		_stdio = MCPStdioLib.new()
-		_stdio.protocol = protocol
-		_stdio.start()
-		printerr("[godot_mcp] RUNTIME MCP on stdio")
 	set_process(true)
 
 
@@ -116,12 +107,6 @@ func _process(_delta: float) -> void:
 	_cmds.root = _scene_root()
 	if _http:
 		_http.poll()
-	if _stdio:
-		_stdio.poll()
-		if _stdio.closed:
-			_stdio.stop()
-			_stdio = null
-			get_tree().quit()
 
 
 ## The node the built-in tools treat as the scene: the first provider's scene_root() when it has
@@ -138,5 +123,3 @@ func _scene_root() -> Node:
 func _exit_tree() -> void:
 	if _http:
 		_http.stop()
-	if _stdio:
-		_stdio.stop()

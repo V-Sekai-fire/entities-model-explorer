@@ -8,6 +8,8 @@ signal fbx_is_loaded(success: bool, fbx: Node)
 const Worker = preload("res://vsk_model_explorer/core/Worker.gd")
 var worker: Worker
 
+const CardStyle = preload("res://vsk_model_explorer/core/CardStyle.gd")
+const BuildConsts = preload("res://addons/vsk_version/build_constants.gd")
 const gltf_vrm_extension_const = preload("res://addons/vrm/vrm_extension.gd")
 const ControlsCard = preload("res://vsk_model_explorer/core/ControlsCard.gd")
 const AutoRig = preload("res://vsk_model_explorer/core/AutoRig.gd")
@@ -31,6 +33,8 @@ var gltf_vrm_extension = gltf_vrm_extension_const.new()
 
 var fbx_doc: Object = null
 var controls_card: Control
+var version_card: PanelContainer
+var version_label: Label
 
 
 # Called when the node enters the scene tree for the first time.
@@ -377,3 +381,40 @@ func _ensure_controls_card() -> void:
 	add_child(layer)
 	controls_card = ControlsCard.new()
 	layer.add_child(controls_card)
+	_add_version_label(layer)
+
+
+func _add_version_label(layer: CanvasLayer) -> void:
+	# A small version card in the top-right corner: the info panel owns the left, the
+	# controls card the bottom-right, so top-right is free. Ink text on the light card is
+	# readable over the 3D view. Two lines: the build date and the build label that the
+	# build bakes into build_constants.gd.
+	var bg := PanelContainer.new()
+	bg.theme = CardStyle.make_theme()
+	var label := Label.new()
+	label.text = BuildConsts.BUILD_DATE_STR + "\n" + BuildConsts.BUILD_LABEL
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg.add_child(label)
+	layer.add_child(bg)
+	version_card = bg
+	version_label = label
+	get_viewport().resizing.connect(_on_version_resized)
+	call_deferred("_fit_version_label", bg, label)
+
+
+func _on_version_resized() -> void:
+	_fit_version_label(version_card, version_label)
+
+
+func _fit_version_label(bg: PanelContainer, label: Label) -> void:
+	# Card padding is double the content margin; size the card, pin top-right.
+	var pw: float = label.get_text_width()
+	var ph: float = label.get_text_height()
+	var pad: float = CardStyle.PAD * 2.0
+	var cw: float = pw + pad
+	var ch: float = ph + pad
+	bg.custom_minimum_size = Vector2(cw, ch)
+	var m: float = CardStyle.MARGIN
+	var vp: Vector2 = get_viewport().size
+	bg.position.x = vp.x - cw - m
+	bg.position.y = m

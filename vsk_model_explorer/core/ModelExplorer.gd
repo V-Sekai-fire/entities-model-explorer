@@ -407,11 +407,14 @@ func _on_version_resized() -> void:
 
 
 func _fit_version_label(bg: PanelContainer, label: Label) -> void:
-	# Card padding = the card's content margin; size the card and pin top-right.
-	var w := label.get_text_width() + CardStyle.PAD * 2.0
-	var h := label.get_text_height() + CardStyle.PAD * 2.0
-	bg.custom_minimum_size = Vector2(w, h)
-	var m := 14.0
-	var vp := get_viewport().size
-	bg.position.x = vp.x - w - m
+	# Card padding is double the content margin; size the card, pin top-right.
+	var pw: float = label.get_text_width()
+	var ph: float = label.get_text_height()
+	var pad: float = CardStyle.PAD * 2.0
+	var cw: float = pw + pad
+	var ch: float = ph + pad
+	bg.custom_minimum_size = Vector2(cw, ch)
+	var m: float = CardStyle.MARGIN
+	var vp: Vector2 = get_viewport().size
+	bg.position.x = vp.x - cw - m
 	bg.position.y = m

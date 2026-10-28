@@ -34,7 +34,6 @@ An MCP client (an AI agent) can open a model in the viewer, auto-rig it, and tak
 
 The server runs in the desktop viewer; the web viewer does not have it.
 
-- stdio: start the viewer with `--quiet -- --mcp-stdio`.
 - HTTP: start the viewer with `-- --mcp-port=8789`. Streamable HTTP is at `http://127.0.0.1:8789/mcp`, and the older HTTP+SSE transport is at `/sse`.
 
 Every protocol version from 2024-11-05 to 2026-07-28 works. `tools/mcp_check.py` checks the desktop viewer with the MCP Python SDK.

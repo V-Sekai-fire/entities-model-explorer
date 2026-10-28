@@ -11,13 +11,20 @@ extends Node
 var lines: PackedStringArray = []
 var slides: Array = []
 
+
 func say(s: String) -> void:
 	lines.append(s)
 	print(s)
 	$Label.text = "\n".join(lines)
 
+
 func _ready() -> void:
-	say("cartridge host: Sandbox class %s" % ("present" if ClassDB.class_exists("Sandbox") else "MISSING"))
+	say(
+		(
+			"cartridge host: Sandbox class %s"
+			% ("present" if ClassDB.class_exists("Sandbox") else "MISSING")
+		)
+	)
 	if OS.has_feature("web"):
 		_install_upload_button()
 	say("STEP upload button ok")
@@ -33,7 +40,9 @@ func _ready() -> void:
 	res["reverse_control"] = _reverse(bytes)
 	res["contrapositive"] = _contra(junk)
 	res["gpu"] = _gpu(await _fetch("res://rd_worker.elf"))
-	var ok: bool = res.unit.pass and res.reverse_control.pass and res.contrapositive.pass and res.gpu.pass
+	var ok: bool = (
+		res.unit.pass and res.reverse_control.pass and res.contrapositive.pass and res.gpu.pass
+	)
 	res["pass"] = ok
 	res["slides"] = slides.size()
 	say("RESULT: %s" % ("PASS" if ok else "FAIL"))
@@ -41,6 +50,7 @@ func _ready() -> void:
 		get_tree().quit()
 	if OS.has_feature("web"):
 		JavaScriptBridge.eval("window.__cart = %s" % JSON.stringify(res), true)
+
 
 # A cartridge: bytes -> Sandbox, or an explicit error. Never a half-made slide.
 func load_cartridge(bytes: PackedByteArray) -> Dictionary:
@@ -51,7 +61,8 @@ func load_cartridge(bytes: PackedByteArray) -> Dictionary:
 		return {"error": "godot-sandbox is not loaded"}
 	add_child(sb)
 	sb.set_binary_translation_bg_compilation(false)
-	if OS.has_feature("web"): sb.set_memory_max(int(_query("vmem", "32")))
+	if OS.has_feature("web"):
+		sb.set_memory_max(int(_query("vmem", "32")))
 	say("STEP mem static=%d vmem=%d" % [OS.get_static_memory_usage(), sb.get_memory_max()])
 	say("STEP load_buffer start bg=%s" % sb.get_binary_translation_bg_compilation())
 	sb.load_buffer(bytes)
@@ -62,21 +73,33 @@ func load_cartridge(bytes: PackedByteArray) -> Dictionary:
 		sb.queue_free()
 		return {"error": "ELF loaded but exposes no functions"}
 	slides.append(sb)
-	say("bintr hash=%08X translated=%s" % [int(sb.get_translation_hash()) & 0xFFFFFFFF, "yes" if sb.is_binary_translated() else "no"])
+	say(
+		(
+			"bintr hash=%08X translated=%s"
+			% [
+				int(sb.get_translation_hash()) & 0xFFFFFFFF,
+				"yes" if sb.is_binary_translated() else "no"
+			]
+		)
+	)
 	return {"sandbox": sb, "functions": fns}
+
 
 func _trace(bytes: PackedByteArray, seed: int) -> String:
 	var c := load_cartridge(bytes)
 	if c.has("error"):
 		return "error: " + c.error
 	var sb = c.sandbox
-	var init: String = sb.vmcall("init_tracer_provider", "cartridge-check", "", {"service.name": "cartridge-check"})
+	var init: String = sb.vmcall(
+		"init_tracer_provider", "cartridge-check", "", {"service.name": "cartridge-check"}
+	)
 	if init != "":
 		return "error: init " + init
 	sb.vmcall("seed_ids", seed)
 	sb.vmcall("set_clock", 1000000000)
 	var span: String = sb.vmcall("start_span", "cartridge-check")
 	return sb.vmcall("trace_id", span)
+
 
 func _unit(bytes: PackedByteArray, expect: String) -> Dictionary:
 	var c := load_cartridge(bytes)
@@ -87,10 +110,24 @@ func _unit(bytes: PackedByteArray, expect: String) -> Dictionary:
 	var missing := need.filter(func(n): return not c.functions.has(n))
 	var t := _trace(bytes, 1234567)
 	var again := _trace(bytes, 1234567)
-	var ok := missing.is_empty() and t.length() == 32 and t == again and (expect == "" or t == expect)
-	say("unit: %s functions=%d missing=%s trace=%s repeat_same=%s expect=%s" % ["PASS" if ok else "FAIL",
-			c.functions.size(), missing, t, t == again, expect if expect != "" else "(none given)"])
+	var ok := (
+		missing.is_empty() and t.length() == 32 and t == again and (expect == "" or t == expect)
+	)
+	say(
+		(
+			"unit: %s functions=%d missing=%s trace=%s repeat_same=%s expect=%s"
+			% [
+				"PASS" if ok else "FAIL",
+				c.functions.size(),
+				missing,
+				t,
+				t == again,
+				expect if expect != "" else "(none given)"
+			]
+		)
+	)
 	return {"pass": ok, "functions": c.functions.size(), "trace": t, "expect": expect}
+
 
 func _reverse(bytes: PackedByteArray) -> Dictionary:
 	var a := _trace(bytes, 1234567)
@@ -98,6 +135,7 @@ func _reverse(bytes: PackedByteArray) -> Dictionary:
 	var ok := a != b and not b.begins_with("error")
 	say("reverse control (other seed differs): %s %s vs %s" % ["PASS" if ok else "FAIL", a, b])
 	return {"pass": ok, "a": a, "b": b}
+
 
 # GPU cartridge: rd_worker.elf opens its own RenderingDevice from inside the guest, compiles its
 # embedded SPIR-V (saxpby + a df32 dot) and checks the dot exactly (rw_round returns 1).
@@ -115,15 +153,27 @@ func _gpu(bytes: PackedByteArray) -> Dictionary:
 	var control := int(sb.vmcall("rw_round", 10, 1))
 	var stats: String = str(sb.vmcall("rw_stats"))
 	var ok := opened.begins_with("OK") and rounds == [1, 1, 1] and control == 0
-	say("gpu: %s open=%s rounds=%s control(unsubmitted, want 0)=%d stats=%s" % ["PASS" if ok else "FAIL", opened.left(120), rounds, control, stats.left(160)])
+	say(
+		(
+			"gpu: %s open=%s rounds=%s control(unsubmitted, want 0)=%d stats=%s"
+			% ["PASS" if ok else "FAIL", opened.left(120), rounds, control, stats.left(160)]
+		)
+	)
 	return {"pass": ok, "open": opened, "rounds": rounds, "control": control, "stats": stats}
+
 
 func _contra(junk: PackedByteArray) -> Dictionary:
 	var before := slides.size()
 	var c := load_cartridge(junk)
 	var ok: bool = c.has("error") and slides.size() == before
-	say("contrapositive (junk refused, no slide): %s error=%s" % ["PASS" if ok else "FAIL", c.get("error", "<none>")])
+	say(
+		(
+			"contrapositive (junk refused, no slide): %s error=%s"
+			% ["PASS" if ok else "FAIL", c.get("error", "<none>")]
+		)
+	)
 	return {"pass": ok, "error": c.get("error", "")}
+
 
 func _query(key: String, fallback: String) -> String:
 	if not OS.has_feature("web"):
@@ -131,8 +181,11 @@ func _query(key: String, fallback: String) -> String:
 			if a.begins_with("--%s=" % key):
 				return a.split("=", true, 1)[1]
 		return fallback
-	var v = JavaScriptBridge.eval("new URLSearchParams(location.search).get('%s') || ''" % key, true)
+	var v = JavaScriptBridge.eval(
+		"new URLSearchParams(location.search).get('%s') || ''" % key, true
+	)
 	return v if v != "" else fallback
+
 
 func _fetch(url: String) -> PackedByteArray:
 	if url.begins_with("res://"):
@@ -144,13 +197,19 @@ func _fetch(url: String) -> PackedByteArray:
 	http.queue_free()
 	return r[3] if r[1] == 200 else PackedByteArray()
 
+
 # Real uploads: a file input on the page; each picked .elf becomes a new slide.
 var _on_file_cb
+
+
 func _install_upload_button() -> void:
 	_on_file_cb = JavaScriptBridge.create_callback(_on_file)
 	var win = JavaScriptBridge.get_interface("window")
 	win.__cartOnFile = _on_file_cb
-	JavaScriptBridge.eval("""
+	(
+		JavaScriptBridge
+		. eval(
+			"""
 		(() => {
 			const i = document.createElement('input');
 			i.type = 'file'; i.accept = '.elf'; i.id = 'cart-upload';
@@ -161,11 +220,20 @@ func _install_upload_button() -> void:
 				window.__cartOnFile(f.name, Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join(''));
 			};
 			document.body.appendChild(i);
-		})()""", true)
+		})()""",
+			true
+		)
+	)
+
 
 func _on_file(args: Array) -> void:
 	var c := load_cartridge(String(args[1]).hex_decode())
 	if c.has("error"):
 		say("upload %s refused: %s" % [args[0], c.error])
 	else:
-		say("upload %s: new slide %d with %d functions" % [args[0], slides.size(), c.functions.size()])
+		say(
+			(
+				"upload %s: new slide %d with %d functions"
+				% [args[0], slides.size(), c.functions.size()]
+			)
+		)

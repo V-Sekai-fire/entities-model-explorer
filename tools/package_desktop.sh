@@ -165,7 +165,22 @@ o="$out/$variant"
 rm -f "$o/$app"-*.zip "$o/$app"-*.tar
 (cd "$o/macos/$app" && zip -qry -n .gguf "$o/$app-macos-arm64.zip" .)
 (cd "$o/windows/$app" && zip -qr -n .gguf "$o/$app-windows-x86_64.zip" .)
-(cd "$o/linux/$app" && tar -cf "$o/$app-linux-x86_64.tar" -- *)
+(cd "$o/linux/$app" && python3 - "$o/$app-linux-x86_64.tar" <<'PY'
+import sys, os, tarfile
+out_tar = sys.argv[1]
+base = os.path.abspath('.')
+files = []
+for root, dirs, flist in os.walk(base):
+    dirs[:] = [d for d in dirs if not d.startswith("._")]
+    for f in flist:
+        if f.startswith("._"): continue
+        rel = os.path.relpath(os.path.join(root,f), base)
+        files.append((rel, os.path.join(root,f)))
+with tarfile.open(out_tar,"w") as t:
+    for rel, full in files:
+        t.add(full, arcname=rel)
+PY
+)
 (cd "$o" && sha256sum "$app"-*.zip "$app"-*.tar > SHA256SUMS 2>/dev/null \
   || shasum -a 256 "$app"-*.zip "$app"-*.tar > SHA256SUMS)
 cat "$o/SHA256SUMS"

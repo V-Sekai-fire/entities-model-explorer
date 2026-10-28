@@ -39,6 +39,19 @@ var card_theme: Theme = CardStyle.make_theme()
 var maxAabb: AABB
 var exploder = preload("res://addons/model_explode/explode.gd").new()
 
+# Touch tap tracking. A single-finger tap is a press with no meaningful drag (the
+# camera's 1-finger orbit and 2-finger pinch/pan are the only other touch gestures,
+# so a tap is otherwise indistinguishable from the start of an orbit). We confirm a
+# tap on the finger lift and cancel it if the finger drags beyond the slop.
+const UI_TAP_SLOP = 12.0
+var _mesh_tap_mesh: MeshInstance3D = null
+var _mesh_tap_index: int = -1
+var _mesh_tap_press_pos: Vector2 = Vector2.ZERO
+var _mesh_tap_cancelled: bool = false
+var _ui_touch_index: int = -1
+var _ui_touch_press_pos: Vector2 = Vector2.ZERO
+var _ui_touch_cancelled: bool = false
+
 
 func _ready():
 	GlobalSignal.trigger_texture_viewer.connect(_show_texture_viewer)

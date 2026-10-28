@@ -59,6 +59,14 @@ if [ "$cmd" = pck ]; then
   git -C "$here" archive HEAD | tar -x -C "$src"
   rm -rf "$src/guest"
   mkdir -p "$src/addons/godot_sandbox/bin"
+  # Bake the build label into the app so the screen shows which build this is.
+  cat > "$src/addons/vsk_version/build_constants.gd" <<EOF
+# Set by the build system, do not modify!
+
+const BUILD_LABEL = "build @ $(git -C $here rev-parse --short HEAD)"
+const BUILD_DATE_STR = "$(date -u +%Y-%m-%d)"
+const BUILD_UNIX_TIME = $(date -u +%s)
+EOF
   cp -R "$SANDBOX"/libgodot_riscv.* "$src/addons/godot_sandbox/bin/"
   cat > "$src/addons/godot_sandbox/bin/godot-riscv.gdextension" <<'E'
 [configuration]

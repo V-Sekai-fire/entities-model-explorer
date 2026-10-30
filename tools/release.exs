@@ -61,7 +61,7 @@ defmodule Release do
       repo: "chibifire/interactor-walk-mode-viewer", space: "chibifire/walk-mode", rig: false, mac_zip: false,
       web: true, web_space: "chibifire/walk-mode-web"}
   ]
-  @elfs ~w(skintokens.elf usd.elf motion.elf headfit.elf mm.elf mujoco.elf)
+  @elfs ~w(skintokens.elf usd.elf motion.elf headfit.elf mm.elf mujoco.elf persona.elf)
   @weights ~w(mesh-encoder.gguf skin-vae.gguf tokenrig.gguf)
   @editor "godot.macos.editor.double.arm64"
   @wine_version "11.18"
@@ -71,7 +71,8 @@ defmodule Release do
     {"interactor-skintokens-guest", "skintokens-elf-", "skintokens.elf"},
     {"interactor-motion-guest", "motion-elf-", "motion.elf"},
     {"interactor-motion-matching-guest", "mm-elf-", "mm.elf"},
-    {"interactor-headfit", "headfit-elf-", "headfit.elf"}
+    {"interactor-headfit", "headfit-elf-", "headfit.elf"},
+    {"interactor-taskweft-persona", "persona-elf-", "persona.elf"}
   ]
 
   def main(argv) do
@@ -360,6 +361,7 @@ defmodule Release do
       {"HEADFIT_ELF", Path.join(elf, "headfit.elf")},
       {"MM_ELF", Path.join(elf, "mm.elf")},
       {"MUJOCO_ELF", Path.join(elf, "mujoco.elf")},
+      {"PERSONA_ELF", Path.join(elf, "persona.elf")},
       {"MM_DATA", Path.join(mmg, "kimodo-locomotion") <> ":" <> Path.join(mmg, "o3de-motionmatching")}
     ]
 
@@ -705,7 +707,7 @@ defmodule Release do
   # @emsdk_version; the compiler (gdscript_to_riscv) is built from its main. Both live in a cache
   # folder (RELEASE_CACHE) that later runs build on incrementally; their commits go to SOURCES.txt.
   @emsdk_version "6.0.12"
-  @web_elfs ~w(skintokens.elf usd.elf mm.elf mujoco.elf headfit.elf)
+  @web_elfs ~w(skintokens.elf usd.elf mm.elf mujoco.elf headfit.elf persona.elf)
 
   def step_web(ctx) do
     cache = cache_dir()

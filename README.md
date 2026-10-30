@@ -30,7 +30,7 @@ V-Sekai Model Explorer is a comprehensive 3D model viewer, designed with the pow
 
 ## MCP server
 
-An MCP client (an AI agent) can open a model in the viewer, auto-rig it, and take the result. The tools are `status`, `load_model`, `auto_rig`, `get_file` and `screenshot`, plus read-only scene tools (`get_scene_tree`, `get_node`, `get_property`, `find_nodes`, `get_aabb`, `get_bone_poses`, `ping`). The server is `addons/vsekai_godot_mcp` (from V-Sekai-fire/transport-godot-mcp, trimmed in `project.godot`); the tools are `vsk_model_explorer/core/RigTools.gd`.
+An MCP client (an AI agent) can open a model in the viewer, auto-rig it, and take the result. The tools are `status`, `load_model`, `auto_rig`, `get_file`, `screenshot` and `persona_ask` (the persona's plan for a goal, from `persona.elf`), plus read-only scene tools (`get_scene_tree`, `get_node`, `get_property`, `find_nodes`, `get_aabb`, `get_bone_poses`, `ping`). The server is `addons/vsekai_godot_mcp` (from V-Sekai-fire/transport-godot-mcp, trimmed in `project.godot`); the tools are `vsk_model_explorer/core/RigTools.gd`.
 
 The server runs in the desktop viewer; the web viewer does not have it.
 

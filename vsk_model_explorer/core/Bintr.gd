@@ -16,6 +16,7 @@ const GUESTS := [
 	["res://motion.elf", 2048, 65536],  # Motion: Kimodo
 	["res://skintokens.elf", 2048, 65536],  # Motion: the clip cut and retarget
 	["res://mujoco.elf", 256, 4096],  # ObstacleCourse: the course's colliders
+	["res://persona.elf", 128, 4096],  # Persona: the ask
 ]
 
 

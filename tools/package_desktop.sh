@@ -28,6 +28,7 @@
 #   MM_ELF   mm.elf (interactor-motion-matching-guest), the motion-matching controller (M)
 #   MUJOCO_ELF  mujoco.elf, double-precision build (mujoco-sandbox-demo project/plans/
 #            mujoco.double.elf), the obstacle course's colliders
+#   PERSONA_ELF  persona.elf (interactor-taskweft-persona), the persona's plan for a goal
 #   MM_DATA  that repo's clip dirs, ':'-separated (data/kimodo-locomotion:data/o3de-motionmatching):
 #            one dir per clip (transforms.f32, skeleton.txt, parents.txt, and loop.txt for a
 #            steady gait cut as a loop), the controller's pose
@@ -100,6 +101,11 @@ E
   python3 -c 'import sys; b = open(sys.argv[1], "rb").read(); sys.exit(0 if b"SBXV(\0\0\0" in b and b"mjc_player_band\0" in b else 1)' \
     "$MUJOCO_ELF" || { echo "$MUJOCO_ELF is not a double-precision mujoco.elf with mjc_player_band"; exit 1; }
   cp "$MUJOCO_ELF" "$src/mujoco.elf"
+  # The double-precision viewer refuses a guest whose .sandbox_variant does not name a 40-byte
+  # Variant, and the host resolves every guest function through .symtab.
+  python3 -c 'import sys; b = open(sys.argv[1], "rb").read(); sys.exit(0 if b"SBXV(\0\0\0" in b and b"persona_ask_json\0" in b else 1)' \
+    "$PERSONA_ELF" || { echo "$PERSONA_ELF is not a double-precision persona.elf carrying the persona's Lean"; exit 1; }
+  cp "$PERSONA_ELF" "$src/persona.elf"
   mkdir -p "$src/motion/mm"
   first=""
   for set in $(echo "$MM_DATA" | tr ':' ' '); do

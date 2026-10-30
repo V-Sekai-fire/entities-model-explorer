@@ -7,6 +7,7 @@ extends Node
 
 const PendingLib = preload("res://addons/vsekai_godot_mcp/mcp_pending.gd")
 const AUTO_RIG := "res://vsk_model_explorer/core/AutoRig.gd"
+const PERSONA := "res://vsk_model_explorer/core/Persona.gd"
 const MODEL_EXTENSIONS := ["glb", "gltf", "vrm", "fbx", "usd", "usda", "usdc", "usdz"]
 # get_file sends a file as base64 in one message; larger files are refused.
 const MAX_FILE_BYTES := 64 << 20
@@ -15,6 +16,7 @@ const RIG_SECONDS := 1800.0
 
 var last_result := ""
 var _auto_rig: Node
+var _persona: RefCounted
 
 
 func tool_defs() -> Array:
@@ -74,6 +76,13 @@ func tool_defs() -> Array:
 			[],
 			true
 		),
+		_tool(
+			"persona_ask",
+			"Ask the persona for a plan: a domain and a goal in, an exact plan out, with no weights and no sampling. An empty goal means the domain's own default. Answers the plan as JSON, or the refusal by name.",
+			{"goal": {"type": "string"}},
+			[],
+			true
+		),
 	]
 
 
@@ -103,6 +112,8 @@ func call_tool(name: String, args: Dictionary):
 			return _later(_rig, args)
 		"screenshot":
 			return _later(_screenshot, args)
+		"persona_ask":
+			return _persona_ask(args)
 	return _err("unknown tool " + name)
 
 
@@ -155,6 +166,20 @@ func _status() -> Dictionary:
 		"last_result": last_result,
 		"message": ar._label.text if ar._label else "",
 	}
+
+
+# --- persona_ask ------------------------------------------------------------------------------
+
+
+# The persona's own answer: a plan, or a refusal by name. No model is involved and nothing
+# in the scene changes, so the call is read-only and immediate.
+func _persona_ask(args: Dictionary) -> Dictionary:
+	if _persona == null:
+		_persona = load(PERSONA).new()
+	var answer: Dictionary = _persona.ask(self, String(args.get("goal", "")))
+	if answer.has("error"):
+		return _err(answer["error"])
+	return answer
 
 
 # --- load_model -------------------------------------------------------------------------------

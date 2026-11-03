@@ -45,18 +45,25 @@ python3 - "$work/repo" "$here/motion/mm" <<'P'
 import pathlib, shutil, sys
 repo, mm = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 mm.mkdir(parents=True, exist_ok=True)
-keys, first = [], None
+rows, first, seen = [], None, {}
 for d in ("data/kimodo-locomotion", "data/o3de-motionmatching"):
     for c in sorted(p for p in (repo / d).iterdir() if p.is_dir()):
         if not (c / "transforms.f32").exists():
             continue
+        if c.name in seen:  # the two datasets share one flat folder: a clash would silently overwrite a clip
+            sys.exit(f"clip name {c.name} is in both {seen[c.name]} and {d}")
+        seen[c.name] = d
+        first = first or c
+        # one skeleton for every clip: the viewer reads a single skeleton.txt and parents.txt
+        if (c / "skeleton.txt").read_text().splitlines()[3:] != (first / "skeleton.txt").read_text().splitlines()[3:] or (c / "parents.txt").read_text() != (first / "parents.txt").read_text():
+            sys.exit(f"{d}/{c.name} has a different skeleton from {first.name}")
+        fps = float(next(l for l in (c / "skeleton.txt").read_text().splitlines()[:3] if l.startswith("frames")).split("fps")[1].split()[0])
         shutil.copy(c / "transforms.f32", mm / (c.name + ".f32"))
         if (c / "phase.f32").exists():
             shutil.copy(c / "phase.f32", mm / (c.name + ".phase.f32"))
-        keys.append(c.name + ("\tloop" if (c / "loop.txt").exists() else ""))
-        first = first or c
-(mm / "clips.tsv").write_text("".join(k + "\n" for k in keys))
+        rows.append(f"{c.name}\t{'loop' if (c / 'loop.txt').exists() else 'once'}\t{fps:g}")
+(mm / "clips.tsv").write_text("".join(r + "\n" for r in rows))
 (mm / "skeleton.txt").write_text("".join((first / "skeleton.txt").read_text().splitlines(True)[3:]))
 shutil.copy(first / "parents.txt", mm / "parents.txt")
-print("clips", len(keys))
+print("clips", len(rows), "rates", sorted({r.split("\t")[2] for r in rows}))
 P

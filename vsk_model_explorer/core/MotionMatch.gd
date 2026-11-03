@@ -465,6 +465,29 @@ static func clip_loops() -> Dictionary:
 	return out
 
 
+# The frame rate of each clip: the third column of clips.tsv (written by tools/fetch_guest_assets.sh from each clip's header). The
+# data repo stores every clip at 60 fps, so a clips.tsv without the column reads as 60.
+const CLIP_FPS_DEFAULT := 60.0
+
+
+static func clip_fps() -> Dictionary:
+	var out := {}
+	for line in FileAccess.get_file_as_string(DIR.path_join("clips.tsv")).split("\n", false):
+		var w := line.split("	")
+		out[w[0]] = float(w[2]) if w.size() > 2 and float(w[2]) > 0.0 else CLIP_FPS_DEFAULT
+	return out
+
+
+# skintokens_motions_begin takes one rate for the whole batch, so every clip must share it.
+static func batch_fps(keys: PackedStringArray) -> float:
+	var fps := clip_fps()
+	var rate: float = fps.get(keys[0], CLIP_FPS_DEFAULT) if keys.size() > 0 else CLIP_FPS_DEFAULT
+	for k in keys:
+		if not is_equal_approx(fps.get(k, CLIP_FPS_DEFAULT), rate):
+			push_error("clips differ in frame rate (%s is %s fps, %s is %s fps)" % [keys[0], rate, k, fps[k]])
+	return rate
+
+
 static func _soma() -> Dictionary:
 	var names := FileAccess.get_file_as_string(DIR.path_join("skeleton.txt")).strip_edges()
 	var parents := PackedInt32Array()
@@ -510,7 +533,7 @@ func _all_clips_at_once(
 ) -> PackedByteArray:
 	var label := "Move: putting %d clips on the rig" % keys.size()
 	say(label)
-	rig.vmcall("skintokens_motions_begin", soma.names, soma.parents, 30.0)
+	rig.vmcall("skintokens_motions_begin", soma.names, soma.parents, batch_fps(keys))
 	for i in keys.size():
 		var k := keys[i]
 		var xf := FileAccess.get_file_as_bytes(DIR.path_join(k + ".f32")).to_float32_array()
@@ -552,7 +575,7 @@ func _clip_by_clip(
 				soma.names,
 				soma.parents,
 				xf,
-				30.0
+				clip_fps().get(keys[i], CLIP_FPS_DEFAULT)
 			)
 		)
 		if not started.begins_with("STARTED"):
@@ -603,11 +626,12 @@ func _bake() -> bool:
 	_mm.vmcall("mm_clear")
 	_keys = clip_keys()
 	var loops := clip_loops()
+	var fps := clip_fps()
 	var soma := _soma()
 	for k in _keys:
 		var xf := FileAccess.get_file_as_bytes(DIR.path_join(k + ".f32")).to_float32_array()
 		var r := str(
-			_mm.vmcall("mm_add_clip", k, soma.names, soma.parents, xf, 30.0, 1 if loops[k] else 0)
+			_mm.vmcall("mm_add_clip", k, soma.names, soma.parents, xf, fps[k], 1 if loops[k] else 0)
 		)
 		if not r.begins_with("ADDED"):
 			_fail(r)

@@ -84,6 +84,7 @@ ls -la "$d"
 echo "== FDB-selftest round trip (mirrors release.yml's verify job)"
 exe="$d/$APP"
 fails=0
+set +e  # the control cases below are MEANT to exit non-zero; -e would abort on the first one
 run() {
   label=$1; want_rc=$2; want=$3; bin=$4; shift 4
   if [ -n "$bin" ]; then export WEFT_FDB_BIN_DIR="$bin"; else unset WEFT_FDB_BIN_DIR; fi

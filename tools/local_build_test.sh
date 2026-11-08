@@ -24,17 +24,26 @@ if [ "$skip_fetch" = 0 ] || [ ! -f "$ENGINE/godot.linuxbsd.editor.double.x86_64"
   echo "== fetching the double-precision engine ($ENGINE_TAG)"
   mkdir -p "$ENGINE"
   cd "$ENGINE"
-  for f in godot.linuxbsd.editor.double.x86_64 godot.linuxbsd.template_release.double.x86_64 \
-           libfdb_c.so fdbserver.linux.x86_64 SHA256SUMS; do
+  # package_desktop.sh's "package" step lays out macOS, Windows AND Linux unconditionally, even
+  # though this script only functionally tests the Linux leg, so all three templates are needed.
+  for f in godot.linuxbsd.editor.double.x86_64 \
+           godot.linuxbsd.template_release.double.x86_64 \
+           godot.macos.template_release.double.arm64 \
+           godot.windows.template_release.double.x86_64.llvm.exe \
+           libfdb_c.so libfdb_c.dylib fdb_c.dll \
+           fdbserver.linux.x86_64 fdbserver.macos.arm64 fdbserver.windows.x86_64.exe \
+           SHA256SUMS; do
     gh release download "$ENGINE_TAG" -R V-Sekai-fire/entities-zone -p "$f" --clobber
   done
-  chmod +x godot.* fdbserver.linux.x86_64
+  chmod +x godot.* fdbserver.*
   cp "$here/LICENSE" LICENSE-model-explorer.txt
 
   echo "== fetching fdbcli ($FDB_RELEASE)"
   mkdir -p "$ENGINE/cli" && cd "$ENGINE/cli"
-  gh release download "$FDB_RELEASE" -R V-Sekai-fire/datasource-foundationdb -p fdbcli.linux.x86_64 --clobber
-  mv fdbcli.linux.x86_64 "$ENGINE/fdbcli.linux.x86_64" && chmod +x "$ENGINE/fdbcli.linux.x86_64"
+  for f in fdbcli.linux.x86_64 fdbcli.macos.arm64 fdbcli.windows.x86_64.exe; do
+    gh release download "$FDB_RELEASE" -R V-Sekai-fire/datasource-foundationdb -p "$f" --clobber
+  done
+  mv fdbcli.* "$ENGINE/" && chmod +x "$ENGINE"/fdbcli.*
   cd "$here"
 
   echo "== fetching the guest programs and walk data"

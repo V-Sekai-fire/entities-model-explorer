@@ -393,6 +393,13 @@ jobs:
           # Contents/MacOS beside the executable), then the .app bundle itself with the
           # entitlements -- rcodesign's bundle signing walks and re-signs every nested Mach-O it
           # finds under Contents, so the bundle-level sign below also covers the main executable.
+          # Run 42498135340 was the first to notarize clean (statusCode 0, Accepted): the actual
+          # cause of every prior "signature of the binary is invalid" (statusCode 4000) was
+          # package_desktop.exs leaving non-Mach-O payload (NOTICE, licences, the auto-rig
+          # weights) loose in Contents/MacOS -- rcodesign's (and Apple codesign's) walk of
+          # Contents/MacOS for nested code chokes on anything there that isn't Mach-O, and the
+          # bundle seal it produces is invalid. That payload now lives in Contents/Resources with
+          # a same-named symlink left in Contents/MacOS, so nothing here needed to change.
           sign "$mac/libfdb_c.dylib"
           sign "$mac/fdbserver"
           sign "$mac/fdbcli"

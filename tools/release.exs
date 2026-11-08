@@ -463,7 +463,7 @@ defmodule Release do
     cp unz/#{v.app} "$C/MacOS/"
     # codesign takes every file in MacOS/ for code, so the weights sit in Resources/ behind a link.
     [ ! -d unz/w ] || { cp -R unz/w "$C/Resources/w"; ln -s ../Resources/w "$C/MacOS/w"; }
-    cp unz/LICENSE.md unz/NOTICE unz/CITATION.cff unz/LICENSE-model-explorer.txt "$C/Resources/"
+    cp unz/#{v.app}.pck unz/LICENSE.md unz/NOTICE unz/CITATION.cff unz/LICENSE-model-explorer.txt "$C/Resources/"
     cp -R unz/libgodot_riscv.macos.template_release.double.universal.framework "$C/Frameworks/"
     cat > "$C/Info.plist" <<'P'
     <?xml version="1.0" encoding="UTF-8"?>

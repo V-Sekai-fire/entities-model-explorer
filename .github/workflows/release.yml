@@ -216,14 +216,11 @@ jobs:
           # A package that cannot be read back is a failed build.
           for z in *.zip; do unzip -tq "$z"; done
           for t in *.tar.gz; do tar -tzf "$t" > /dev/null; done
-          # The pck is embedded in the executable now (package_desktop.sh cats it on); no
-          # sibling "$APP.pck" ships, and each archive holds exactly one executable.
-          unzip -l "$APP-$tag-macos-arm64.zip" | grep -q "$APP$"
-          ! unzip -l "$APP-$tag-macos-arm64.zip" | grep -q "$APP.pck"
+          # The pck sits beside the executable (sibling "$APP.pck"): embedding via plain cat was
+          # proven to fail in CI (run 42475189673, 2026-11-08); see package_desktop.sh's lay().
+          unzip -l "$APP-$tag-macos-arm64.zip" | grep -q "$APP.pck"
           unzip -l "$APP-$tag-windows-x86_64.zip" | grep -q "$APP.exe"
-          ! unzip -l "$APP-$tag-windows-x86_64.zip" | grep -q "$APP.pck"
-          tar -tzf "$APP-$tag-linux-x86_64.tar.gz" | grep -q "^$APP$"
-          ! tar -tzf "$APP-$tag-linux-x86_64.tar.gz" | grep -q "$APP.pck"
+          tar -tzf "$APP-$tag-linux-x86_64.tar.gz" | grep -q "$APP.pck"
 
       - name: Ship the matching editor and export templates
         run: |

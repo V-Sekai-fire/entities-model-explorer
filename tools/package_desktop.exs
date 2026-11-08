@@ -370,16 +370,45 @@ defmodule PackageDesktop do
            :ok <- chmod_x(Path.join(bin_dir, "fdbserver#{suffix}")),
            :ok <- File.cp(Path.join(engine, "fdbcli.#{server_platform}"), Path.join(bin_dir, "fdbcli#{suffix}")),
            :ok <- chmod_x(Path.join(bin_dir, "fdbcli#{suffix}")),
-           :ok <- File.cp(Path.join(engine, "LICENSE-model-explorer.txt"), Path.join(bin_dir, "LICENSE-model-explorer.txt")),
-           :ok <- File.cp(Path.join(notices, "LICENSE.md"), Path.join(bin_dir, "LICENSE.md")),
-           :ok <- File.cp(Path.join(notices, "NOTICE"), Path.join(bin_dir, "NOTICE")),
-           :ok <- File.cp(Path.join(notices, "CITATION.cff"), Path.join(bin_dir, "CITATION.cff")),
-           :ok <- link_weights(bin_dir, weights, w),
+           :ok <- place_resource(os, bin_dir, "LICENSE-model-explorer.txt", Path.join(engine, "LICENSE-model-explorer.txt")),
+           :ok <- place_resource(os, bin_dir, "LICENSE.md", Path.join(notices, "LICENSE.md")),
+           :ok <- place_resource(os, bin_dir, "NOTICE", Path.join(notices, "NOTICE")),
+           :ok <- place_resource(os, bin_dir, "CITATION.cff", Path.join(notices, "CITATION.cff")),
+           :ok <- link_weights(os, bin_dir, weights, w),
            :ok <- link_bintr(bin_dir, os) do
         :ok
       end
     end
   end
+
+  # Apple's codesign/notarization walks Contents/MacOS looking for nested Mach-O code and chokes on
+  # any non-Mach-O regular file or directory sitting there directly next to the main executable --
+  # confirmed locally (real macOS `codesign`, not rcodesign): signing this exact layout (loose
+  # NOTICE file, loose weights dir, both plain data) and then `codesign --verify --deep --strict`
+  # answers "code object is not signed at all" / "code has no resources but signature indicates
+  # they must be present" for the bundle -- the same "signature of the binary is invalid"
+  # (statusCode 4000) Apple's notary service gave in CI, just caught locally without spending a
+  # notary submission. Genuine Mach-O (libfdb_c.dylib, fdbserver, fdbcli, signed individually above)
+  # is fine staying loose in Contents/MacOS; plain data is not. Fix: the real files live in
+  # Contents/Resources (codesign's normal sealed-resource location, verified clean the same way),
+  # and Contents/MacOS gets a symlink with the same name -- GDScript's
+  # OS.get_executable_path().get_base_dir()-relative lookups (FdbServer.gd, AutoRig.gd, Motion.gd)
+  # still find the files right where they expect, and archive/2's `zip -qry` already passes `-y`,
+  # which stores the symlink itself (not its target) in the shipped .zip.
+  defp place_resource("macos", bin_dir, name, src) do
+    contents = Path.dirname(bin_dir)
+    res_dir = Path.join(contents, "Resources")
+    File.mkdir_p!(res_dir)
+    dest = Path.join(res_dir, name)
+
+    with :ok <- File.cp(src, dest) do
+      link = Path.join(bin_dir, name)
+      File.rm(link)
+      File.ln_s(Path.join("..", Path.join("Resources", name)), link)
+    end
+  end
+
+  defp place_resource(_os, bin_dir, name, src), do: File.cp(src, Path.join(bin_dir, name))
 
   # macOS (preset "Mac"): exports a real .app bundle via --export-release, output path ending in
   # ".app" so Godot's macOS exporter writes the bundle directly instead of zipping it. The
@@ -450,11 +479,25 @@ defmodule PackageDesktop do
     end
   end
 
-  defp link_weights(_d, [], _w), do: :ok
+  defp link_weights(_os, _d, [], _w), do: :ok
 
-  defp link_weights(d, weights, w) do
+  # macOS: the real weight files land in Contents/Resources/w (see place_resource/4 above for
+  # why), with Contents/MacOS/w left as a single symlink to it so AutoRig.gd's
+  # get_executable_path().get_base_dir()-relative lookup still finds them.
+  defp link_weights("macos", d, weights, w) do
+    target_dir = Path.join([Path.dirname(d), "Resources", "w"])
+    File.mkdir_p!(target_dir)
+    link = Path.join(d, "w")
+    File.rm(link)
+    :ok = File.ln_s(Path.join("..", Path.join("Resources", "w")), link)
+    link_weights_into(target_dir, weights, w)
+  end
+
+  defp link_weights(_os, d, weights, w), do: link_weights_into(Path.join(d, "w"), weights, w)
+
+  defp link_weights_into(target_dir, weights, w) do
     Enum.reduce_while(weights, :ok, fn f, _ ->
-      dest = Path.join([d, "w", f])
+      dest = Path.join(target_dir, f)
       File.mkdir_p!(Path.dirname(dest))
       src = Path.join(w, f)
 

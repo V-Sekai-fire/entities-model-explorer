@@ -251,6 +251,10 @@ defmodule Release do
 
   # usd.elf has no CI build. Carry it from the published walk-mode viewer (its Windows zip is the
   # smallest package holding the pck), after checking that zip against the repo's SHA256SUMS.
+  # NOTE: this reads a sibling "walk-mode-viewer.pck" out of the zip. Once a build made with the
+  # embedded-pck lay() (package_desktop.sh, 2026-11-08) is published here, there is no sibling pck
+  # to extract and this needs to instead locate the GDPC footer appended to the executable itself.
+  # Not hit yet: the HF repo this reads from still carries a pre-embed build.
   defp usd_from_published(ctx, d) do
     repo = "chibifire/interactor-walk-mode-viewer"
     zip = Path.join(d, "previous-walk-mode-windows.zip")
@@ -459,7 +463,7 @@ defmodule Release do
     cp unz/#{v.app} "$C/MacOS/"
     # codesign takes every file in MacOS/ for code, so the weights sit in Resources/ behind a link.
     [ ! -d unz/w ] || { cp -R unz/w "$C/Resources/w"; ln -s ../Resources/w "$C/MacOS/w"; }
-    cp unz/#{v.app}.pck unz/LICENSE.md unz/NOTICE unz/CITATION.cff unz/LICENSE-model-explorer.txt "$C/Resources/"
+    cp unz/LICENSE.md unz/NOTICE unz/CITATION.cff unz/LICENSE-model-explorer.txt "$C/Resources/"
     cp -R unz/libgodot_riscv.macos.template_release.double.universal.framework "$C/Frameworks/"
     cat > "$C/Info.plist" <<'P'
     <?xml version="1.0" encoding="UTF-8"?>

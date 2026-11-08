@@ -151,9 +151,11 @@ lay() { # <os> <runtime> <exe suffix> <FoundationDB client> <server platform>
   d="$out/$variant/$1/$app"
   rm -rf "$out/$variant/$1" && mkdir -p "$d"
   [ -z "$weights" ] || mkdir -p "$d/w"
-  cp "$ENGINE/$2" "$d/$app$3" && chmod +x "$d/$app$3"
-  # Godot loads the pck that has the name of the program.
-  cp "$out/skintokens-viewer.pck" "$d/$app.pck"
+  # Embed the pck in the executable (Godot's own embed_pck technique: the engine's pck loader
+  # scans backward from EOF for the pack footer, so a plain concatenation works on every OS,
+  # the same way Godot's own --export-release with binary_format/embed_pck=true would produce
+  # it). No sibling "$app.pck" ships; see export_presets.cfg's embed_pck=true.
+  cat "$ENGINE/$2" "$out/skintokens-viewer.pck" > "$d/$app$3" && chmod +x "$d/$app$3"
   cp "$ENGINE/$4" "$d/"  # the FoundationDB client the runtime links, beside it
   # The server and its command line sit beside the runtime; FdbServer.gd starts them. One name on every OS.
   cp "$ENGINE/fdbserver.$5" "$d/fdbserver$3" && chmod +x "$d/fdbserver$3"

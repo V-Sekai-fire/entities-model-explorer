@@ -206,7 +206,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/no-weights"
           tools/package_desktop.sh package "$RUNNER_TEMP/out" "$RUNNER_TEMP/no-weights" walk-mode
           mkdir -p dist
-          cp "$RUNNER_TEMP/out/walk-mode/$APP"-*.zip "$RUNNER_TEMP/out/walk-mode/$APP"-*.tar dist/
+          cp "$RUNNER_TEMP/out/walk-mode/$APP"-*.zip "$RUNNER_TEMP/out/walk-mode/$APP"-*.tar.gz dist/
           # Name the archives after the tag: walk-mode-viewer-<tag>-<os>-<arch>.<ext>
           tag="$TAG"
           cd dist
